@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS Region in which to deploy the discovery slice."
+  description = "AWS Region in which to deploy the ingestion resources."
   type        = string
   default     = "eu-west-1"
 }
@@ -142,6 +142,12 @@ variable "log_retention_days" {
 
 variable "registry_deletion_protection_enabled" {
   description = "Protect the filing registry from Terraform and API deletion."
+  type        = bool
+  default     = false
+}
+
+variable "raw_bucket_force_destroy" {
+  description = "Allow Terraform to delete all raw object versions during bucket destruction."
   type        = bool
   default     = false
 }

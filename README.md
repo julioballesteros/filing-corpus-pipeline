@@ -103,6 +103,7 @@ Terraform under `infra/terraform` deploys the complete first vertical slice:
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
 
 DynamoDB filing registry (ready for the next acquisition Map state)
+S3 raw-document bucket (ready for the next acquisition Map state)
 ```
 
 Step Functions owns the execution history and transient Lambda retry policy.
@@ -115,8 +116,9 @@ accounts with sufficient regional quota.
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
 logs, and only then enable recurring discovery. The DynamoDB registry is not
-yet invoked by the workflow; object storage, filing downloads, queues, and
-document processing intentionally remain outside this slice.
+yet invoked by the workflow, and the S3 bucket does not yet receive objects.
+Filing downloads, queues, and document processing intentionally remain outside
+this slice.
 
 ## Filing registry
 
@@ -132,6 +134,18 @@ being retried on every overlapping discovery run. Only the active owner may
 mark a filing stored or failed. See
 [`docs/filing-registry.md`](docs/filing-registry.md) for the item schema,
 transition rules, and recovery cases.
+
+## Raw document storage
+
+The private S3 bucket is the durable boundary for byte-for-byte source filings.
+It has account-enforced ownership, complete public-access blocking, HTTPS-only
+access, default encryption, versioning, and bounded cleanup of noncurrent data.
+Current source documents have no expiration because they are corpus provenance.
+
+The bucket name is stable for an account, environment, and Region without being
+globally collision-prone. Terraform refuses to destroy a populated bucket by
+default. The acquisition service will later write deterministic object keys and
+return only S3 metadata through Step Functions—never the document body.
 
 To prepare a deployment:
 

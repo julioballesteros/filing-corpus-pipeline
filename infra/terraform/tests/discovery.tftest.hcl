@@ -8,6 +8,14 @@ mock_provider "aws" {
   }
 
   override_data {
+    target          = data.aws_caller_identity.current
+    override_during = plan
+    values = {
+      account_id = "123456789012"
+    }
+  }
+
+  override_data {
     target = data.aws_iam_policy_document.lambda_assume_role
     values = {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
@@ -44,6 +52,13 @@ mock_provider "aws" {
 
   override_data {
     target = data.aws_iam_policy_document.scheduler
+    values = {
+      json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.raw_documents
     values = {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
     }
@@ -130,6 +145,59 @@ run "default_ingestion_slice" {
   assert {
     condition     = aws_dynamodb_table.filing_registry.deletion_protection_enabled == false
     error_message = "Deletion protection must remain opt-in for the disposable dev stack."
+  }
+
+  assert {
+    condition = startswith(
+      aws_s3_bucket.raw_documents.bucket,
+      "filing-corpus-pipeline-dev-raw-123456789012-",
+    )
+    error_message = "The raw bucket name must be stable and account-qualified."
+  }
+
+  assert {
+    condition     = aws_s3_bucket.raw_documents.force_destroy == false
+    error_message = "Terraform must not delete a nonempty raw bucket by default."
+  }
+
+  assert {
+    condition     = aws_s3_bucket_ownership_controls.raw_documents.rule[0].object_ownership == "BucketOwnerEnforced"
+    error_message = "Raw objects must always be owned by the bucket account."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.raw_documents.block_public_acls,
+      aws_s3_bucket_public_access_block.raw_documents.block_public_policy,
+      aws_s3_bucket_public_access_block.raw_documents.ignore_public_acls,
+      aws_s3_bucket_public_access_block.raw_documents.restrict_public_buckets,
+    ])
+    error_message = "Every S3 public-access control must be enabled."
+  }
+
+  assert {
+    condition = (
+      one(one(
+        aws_s3_bucket_server_side_encryption_configuration.raw_documents.rule
+      ).apply_server_side_encryption_by_default).sse_algorithm == "AES256"
+    )
+    error_message = "Raw filing objects must be encrypted at rest."
+  }
+
+  assert {
+    condition     = aws_s3_bucket_versioning.raw_documents.versioning_configuration[0].status == "Enabled"
+    error_message = "Raw filing objects must be versioned for overwrite recovery."
+  }
+
+  assert {
+    condition = toset([
+      for rule in aws_s3_bucket_lifecycle_configuration.raw_documents.rule : rule.id
+      ]) == toset([
+      "abort-incomplete-multipart-uploads",
+      "expire-noncurrent-versions",
+      "remove-expired-delete-markers",
+    ])
+    error_message = "The raw bucket must retain all cost and recovery lifecycle rules."
   }
 }
 

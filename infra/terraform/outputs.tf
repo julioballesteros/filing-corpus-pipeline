@@ -32,3 +32,13 @@ output "filing_registry_table_arn" {
   description = "ARN of the DynamoDB filing registry table."
   value       = aws_dynamodb_table.filing_registry.arn
 }
+
+output "raw_documents_bucket_name" {
+  description = "Private S3 bucket containing immutable-source filing documents."
+  value       = aws_s3_bucket.raw_documents.bucket
+}
+
+output "raw_documents_bucket_arn" {
+  description = "ARN of the raw filing document bucket."
+  value       = aws_s3_bucket.raw_documents.arn
+}

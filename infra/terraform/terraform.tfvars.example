@@ -24,3 +24,7 @@ schedule_enabled = false
 # Keep false while iterating locally. Enable for a long-lived environment after
 # verifying the destroy/recovery procedure.
 registry_deletion_protection_enabled = false
+
+# Leave false so Terraform refuses to delete a bucket containing any object
+# versions. Set true only for an explicitly disposable environment.
+raw_bucket_force_destroy = false

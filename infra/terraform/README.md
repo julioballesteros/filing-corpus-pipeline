@@ -6,6 +6,7 @@ This Terraform stack deploys the first asynchronous ingestion slice:
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
 
 DynamoDB filing registry (not connected until the acquisition Lambda is added)
+S3 raw-document bucket (not connected until the acquisition Lambda is added)
 ```
 
 The state machine is the execution record and retry boundary. It invokes the
@@ -22,19 +23,21 @@ response envelope.
 - retained JSON Lambda logs, complete workflow logs, and X-Ray tracing;
 - a five-company watchlist limit and three-minute Lambda timeout to bound work
   per execution and SEC request pressure; and
-- an on-demand, encrypted DynamoDB filing registry with point-in-time recovery.
+- an on-demand, encrypted DynamoDB filing registry with point-in-time recovery;
+  and
+- a private, encrypted and versioned S3 bucket for raw source documents.
 
-The registry is intentionally not connected to discovery. The acquisition
-Lambda will receive narrowly scoped item permissions and use it from each Map
-iteration. No queue, object store, downloader, or document processor is created
-yet. Terraform state is local for now; a remote backend should be bootstrapped
-before multiple people or automated deployment share this stack.
+The registry and bucket are intentionally not connected to discovery. The
+acquisition Lambda will receive narrowly scoped permissions and use them from
+each Map iteration. No queue, downloader, or document processor is created yet.
+Terraform state is local for now; a remote backend should be bootstrapped before
+multiple people or automated deployment share this stack.
 
 ## Deploy
 
 Prerequisites are Terraform 1.14+, AWS credentials for the target account, and
 permission to manage Lambda, IAM, Step Functions, EventBridge Scheduler,
-CloudWatch Logs, X-Ray configuration, and DynamoDB.
+CloudWatch Logs, X-Ray configuration, DynamoDB, and S3.
 
 ```bash
 cd infra/terraform
@@ -84,6 +87,19 @@ secondary indexes or TTL. Registry records are provenance and recovery state,
 so they are retained. Enable `registry_deletion_protection_enabled` for a
 long-lived environment after verifying the backup and teardown procedures.
 
+The raw-document bucket blocks every form of public access, disables ACL-based
+ownership, denies non-TLS requests, and applies SSE-S3 encryption. Versioning
+protects against accidental overwrites. Current raw documents do not expire;
+noncurrent versions expire after 30 days, incomplete multipart uploads after
+seven days, and orphaned delete markers are removed. The generated bucket name
+contains the AWS account ID and a stable environment/Region hash, and is
+available through the `raw_documents_bucket_name` output.
+
+The acquisition service will use deterministic keys shaped like
+`raw/{provider}/{issuer_id}/{filing_id}/{document_name}` and store the resulting
+bucket/key, digest, and content metadata in the registry. This key
+contract is documented now but is not enforced until acquisition is added.
+
 ## Reconfigure or remove
 
 Change the watchlist, forms, lookback, frequency, or log retention through
@@ -95,4 +111,6 @@ terraform destroy
 ```
 
 Deletion protection must be disabled and applied before Terraform can destroy
-the registry table.
+the registry table. A nonempty raw bucket also blocks destruction by default.
+Set `raw_bucket_force_destroy = true` only when every object version in an
+explicitly disposable environment may be deleted.
