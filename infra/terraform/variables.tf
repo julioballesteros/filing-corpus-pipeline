@@ -139,3 +139,22 @@ variable "log_retention_days" {
     error_message = "log_retention_days must be a supported CloudWatch retention value up to 365 days."
   }
 }
+
+variable "lambda_reserved_concurrency" {
+  description = "Optional Lambda concurrency reservation; null uses regional unreserved concurrency."
+  type        = number
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.lambda_reserved_concurrency == null ||
+      (
+        var.lambda_reserved_concurrency >= 1 &&
+        var.lambda_reserved_concurrency <= 10 &&
+        floor(var.lambda_reserved_concurrency) == var.lambda_reserved_concurrency
+      )
+    )
+    error_message = "lambda_reserved_concurrency must be null or an integer from 1 through 10."
+  }
+}

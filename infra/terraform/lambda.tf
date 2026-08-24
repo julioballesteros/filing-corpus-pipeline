@@ -29,7 +29,7 @@ resource "aws_lambda_function" "discovery" {
 
   memory_size                    = 512
   timeout                        = 180
-  reserved_concurrent_executions = 1
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
 
   environment {
     variables = {

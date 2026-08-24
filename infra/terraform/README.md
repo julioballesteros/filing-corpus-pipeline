@@ -18,8 +18,8 @@ response envelope.
 - an EventBridge schedule with a deterministic rolling-window input;
 - least-privilege execution roles for the three services;
 - retained JSON Lambda logs, complete workflow logs, and X-Ray tracing; and
-- a five-company watchlist limit and reserved Lambda concurrency of one to
-  bound execution time and SEC request pressure.
+- a five-company watchlist limit and three-minute Lambda timeout to bound work
+  per execution and SEC request pressure.
 
 No database, queue, object store, downloader, or document processor is created
 in this slice. Terraform state is local for now; a remote backend should be
@@ -35,6 +35,7 @@ CloudWatch Logs, and X-Ray configuration.
 cd infra/terraform
 cp terraform.tfvars.example terraform.tfvars
 # Replace the example AWS account ID and SEC contact address before continuing.
+aws sts get-caller-identity
 terraform init
 terraform plan -out=discovery.tfplan
 terraform apply discovery.tfplan
@@ -42,10 +43,16 @@ terraform apply discovery.tfplan
 
 The AWS provider checks `allowed_account_ids` before planning or applying, so
 credentials for an unexpected account fail closed instead of creating a second
-copy of the stack there.
+copy of the stack there. The reported account must also be the account already
+represented by the current Terraform state. If it differs, select the intended
+AWS credentials instead of bypassing the allowlist.
 
 The schedule is disabled by default. This prevents an apply from immediately
 making external requests and gives you a chance to verify a manual execution.
+Reserved Lambda concurrency is also unset by default because small or new AWS
+accounts may not have enough regional quota to reserve capacity while retaining
+the service-required unreserved pool. If the account has sufficient headroom,
+set `lambda_reserved_concurrency = 1` to impose a hard function-level cap.
 
 ## Verify manually
 

@@ -16,3 +16,7 @@ schedule_expression = "rate(6 hours)"
 
 # Deploy disabled, run a manual execution, then enable recurring discovery.
 schedule_enabled = false
+
+# Leave unset in quota-constrained accounts. Enable only after confirming that
+# the regional Lambda concurrency quota has enough unreserved headroom.
+# lambda_reserved_concurrency = 1

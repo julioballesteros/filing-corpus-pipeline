@@ -74,8 +74,8 @@ run "default_discovery_slice" {
   }
 
   assert {
-    condition     = aws_lambda_function.discovery.reserved_concurrent_executions == 1
-    error_message = "Discovery concurrency must stay bounded."
+    condition     = aws_lambda_function.discovery.reserved_concurrent_executions == null
+    error_message = "Reserved concurrency must be opt-in for quota-constrained accounts."
   }
 
   assert {
@@ -123,13 +123,19 @@ run "enabled_schedule" {
   command = plan
 
   variables {
-    allowed_account_ids = ["123456789012"]
-    sec_user_agent      = "filing-corpus-pipeline ci@example.com"
-    schedule_enabled    = true
+    allowed_account_ids         = ["123456789012"]
+    lambda_reserved_concurrency = 1
+    sec_user_agent              = "filing-corpus-pipeline ci@example.com"
+    schedule_enabled            = true
   }
 
   assert {
     condition     = aws_scheduler_schedule.discovery.state == "ENABLED"
     error_message = "schedule_enabled must control the deployed schedule state."
+  }
+
+  assert {
+    condition     = aws_lambda_function.discovery.reserved_concurrent_executions == 1
+    error_message = "Reserved concurrency must be configurable when quota permits."
   }
 }

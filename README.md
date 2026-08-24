@@ -101,9 +101,11 @@ EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
 ```
 
 Step Functions owns the execution history and transient Lambda retry policy.
-The Lambda is a small, dependency-free ZIP deployment with bounded concurrency,
-JSON logs, retained CloudWatch log groups, and X-Ray tracing. EventBridge sends
-the scheduled timestamp plus the configured watchlist and lookback window.
+The Lambda is a small, dependency-free ZIP deployment with a bounded watchlist
+and timeout, JSON logs, retained CloudWatch log groups, and X-Ray tracing.
+EventBridge sends the scheduled timestamp plus the configured watchlist and
+lookback window. Reserved concurrency is available as an opt-in control for AWS
+accounts with sufficient regional quota.
 
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
