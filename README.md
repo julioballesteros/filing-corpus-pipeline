@@ -19,11 +19,35 @@ Commit the generated `uv.lock` file so local development and CI use the same
 resolved dependencies.
 
 
-## Run the application
+## Run discovery locally
 
 ```bash
-uv run filing-corpus-pipeline
+export SEC_USER_AGENT="filing-corpus-pipeline your-email@example.com"
+
+uv run filing-corpus-pipeline discover \
+  --cik 0000320193 \
+  --filed-from 2025-01-01 \
+  --form 10-K \
+  --form 10-Q
 ```
+
+The command queries SEC submission metadata and prints the JSON-compatible
+payload that the future parent Step Functions workflow will receive. It does
+not download filing documents or write pipeline state.
+
+SEC automated access requires a declared user agent. Use a real monitored
+contact address and do not commit it to the repository.
+
+## Initial code boundaries
+
+- `domain`: provider-neutral filing records passed between pipeline stages.
+- `discovery`: the discovery request, result, provider port, and use case.
+- `adapters/sec`: SEC-specific HTTP response parsing and record mapping.
+- `entrypoints`: thin runtime composition such as the local CLI and future
+  Lambda handler.
+
+Later acquisition and processing stages should consume `FilingReference`
+records without depending on SEC response formats.
 
 
 ## Quality checks

@@ -1,0 +1,93 @@
+"""Tests for the standard-library JSON HTTP transport."""
+
+from email.message import Message
+from unittest.mock import MagicMock
+from urllib.error import HTTPError, URLError
+
+import pytest
+
+from filing_corpus_pipeline.adapters import http
+from filing_corpus_pipeline.adapters.http import HttpTransportError, UrllibJsonTransport
+
+
+def test_transport_decodes_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The runtime transport returns decoded JSON using response charset metadata."""
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b'{"ok": true}'
+    response.__enter__.return_value.headers.get_content_charset.return_value = None
+    urlopen = MagicMock(return_value=response)
+    monkeypatch.setattr(http, "urlopen", urlopen)
+
+    result = UrllibJsonTransport().get_json(
+        "https://example.test/data.json",
+        headers={"User-Agent": "test"},
+        timeout_seconds=3.0,
+    )
+
+    assert result == {"ok": True}
+    assert urlopen.call_args.kwargs["timeout"] == 3.0
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable", "status_code"),
+    [
+        (
+            HTTPError(
+                "https://example.test",
+                429,
+                "rate limited",
+                Message(),
+                None,
+            ),
+            True,
+            429,
+        ),
+        (
+            HTTPError(
+                "https://example.test",
+                404,
+                "not found",
+                Message(),
+                None,
+            ),
+            False,
+            404,
+        ),
+        (URLError("offline"), True, None),
+    ],
+)
+def test_transport_classifies_request_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    retryable: bool,
+    status_code: int | None,
+) -> None:
+    """The SEC client receives enough information to apply its retry policy."""
+    monkeypatch.setattr(http, "urlopen", MagicMock(side_effect=error))
+
+    with pytest.raises(HttpTransportError) as raised:
+        UrllibJsonTransport().get_json(
+            "https://example.test/data.json",
+            headers={},
+            timeout_seconds=3.0,
+        )
+
+    assert raised.value.retryable is retryable
+    assert raised.value.status_code == status_code
+
+
+def test_transport_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful HTTP status with invalid JSON is a permanent data failure."""
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b"not-json"
+    response.__enter__.return_value.headers.get_content_charset.return_value = "utf-8"
+    monkeypatch.setattr(http, "urlopen", MagicMock(return_value=response))
+
+    with pytest.raises(HttpTransportError) as raised:
+        UrllibJsonTransport().get_json(
+            "https://example.test/data.json",
+            headers={},
+            timeout_seconds=3.0,
+        )
+
+    assert raised.value.retryable is False
