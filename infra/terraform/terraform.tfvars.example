@@ -1,0 +1,15 @@
+# Use a real, monitored address. This value is ignored when saved as terraform.tfvars.
+sec_user_agent = "filing-corpus-pipeline your-email@example.com"
+
+aws_region = "eu-west-1"
+
+# Apple and Microsoft are a deliberately small initial watchlist.
+issuer_ids = ["0000320193", "0000789019"]
+
+filing_forms  = ["10-K", "10-Q"]
+lookback_days = 7
+
+schedule_expression = "rate(6 hours)"
+
+# Deploy disabled, run a manual execution, then enable recurring discovery.
+schedule_enabled = false

@@ -1,4 +1,5 @@
-.PHONY: install hooks format format-check lint lint-fix typecheck test check
+.PHONY: install hooks format format-check lint lint-fix typecheck test \
+	infra-format infra-format-check infra-init infra-validate infra-test check
 
 install:
 	uv sync --all-groups
@@ -9,9 +10,11 @@ hooks:
 format:
 	uv run ruff check --fix .
 	uv run black .
+	terraform fmt -recursive infra/terraform
 
 format-check:
 	uv run black --check .
+	terraform fmt -check -recursive infra/terraform
 
 lint:
 	uv run ruff check .
@@ -25,4 +28,19 @@ typecheck:
 test:
 	uv run pytest
 
-check: format-check lint typecheck test
+infra-format:
+	terraform fmt -recursive infra/terraform
+
+infra-format-check:
+	terraform fmt -check -recursive infra/terraform
+
+infra-init:
+	terraform -chdir=infra/terraform init -backend=false
+
+infra-validate: infra-init
+	terraform -chdir=infra/terraform validate
+
+infra-test: infra-init
+	terraform -chdir=infra/terraform test
+
+check: format-check lint typecheck test infra-validate infra-test

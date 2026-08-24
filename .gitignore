@@ -19,6 +19,20 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 
+# Terraform local state, plans, caches, and build artifacts
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+infra/terraform/discovery-lambda.zip
+
 # Editors and operating systems
 .DS_Store
 .idea/

@@ -6,6 +6,7 @@ Service and infrastructure for filing ingestion and processing.
 
 - Python 3.13 or newer
 - [uv](https://docs.astral.sh/uv/)
+- Terraform 1.14 or newer (for infrastructure work)
 
 ## Set up development
 
@@ -32,8 +33,8 @@ uv run filing-corpus-pipeline discover \
 ```
 
 The command queries SEC submission metadata and prints the JSON-compatible
-payload that the future parent Step Functions workflow will receive. It does
-not download filing documents or write pipeline state.
+payload that the parent Step Functions workflow receives. It does not download
+filing documents or write pipeline state.
 
 SEC automated access requires a declared user agent. Use a real monitored
 contact address and do not commit it to the repository.
@@ -43,8 +44,7 @@ contact address and do not commit it to the repository.
 - `domain`: provider-neutral filing records passed between pipeline stages.
 - `discovery`: the discovery request, result, provider port, and use case.
 - `adapters/sec`: SEC-specific HTTP response parsing and record mapping.
-- `entrypoints`: thin runtime composition such as the local CLI and future
-  Lambda handler.
+- `entrypoints`: thin runtime composition for the local CLI and Lambda handler.
 
 Later acquisition and processing stages should consume `FilingReference`
 records without depending on SEC response formats.
@@ -92,6 +92,37 @@ produce the inclusive filing-date bounds. Exact and rolling date fields are
 mutually exclusive, making every scheduled execution deterministic and
 replayable.
 
+## AWS discovery slice
+
+Terraform under `infra/terraform` deploys the complete first vertical slice:
+
+```text
+EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
+```
+
+Step Functions owns the execution history and transient Lambda retry policy.
+The Lambda is a small, dependency-free ZIP deployment with bounded concurrency,
+JSON logs, retained CloudWatch log groups, and X-Ray tracing. EventBridge sends
+the scheduled timestamp plus the configured watchlist and lookback window.
+
+The schedule is disabled by default. This makes deployment side-effect-safe:
+first run an exact-date execution manually, inspect its workflow output and
+logs, and only then enable recurring discovery. DynamoDB, object storage,
+queues, filing downloads, and document processing intentionally remain outside
+this slice.
+
+To prepare a deployment:
+
+```bash
+cd infra/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Replace the SEC contact address, then authenticate to AWS.
+terraform init
+terraform plan
+```
+
+See [`infra/terraform/README.md`](infra/terraform/README.md) for the deployment,
+manual smoke-test, enablement, and teardown workflow.
 
 ## Quality checks
 
@@ -100,14 +131,19 @@ uv run black .
 uv run ruff check .
 uv run mypy
 uv run pytest
+terraform fmt -check -recursive infra/terraform
+terraform -chdir=infra/terraform init -backend=false
+terraform -chdir=infra/terraform validate
+terraform -chdir=infra/terraform test
 ```
 
 The same commands are available through `make format`, `make lint`,
-`make typecheck`, `make test`, and `make check`.
+`make typecheck`, `make test`, `make infra-validate`, `make infra-test`, and
+`make check`.
 
 
-GitHub Actions runs the complete check suite for pushes to `main` and pull
-requests.
+GitHub Actions runs the Python quality suite and credential-free Terraform plan
+tests for pushes to `main` and pull requests.
 
 
 ## Updating from the template
