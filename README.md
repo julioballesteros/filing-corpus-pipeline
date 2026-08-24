@@ -116,7 +116,7 @@ To prepare a deployment:
 ```bash
 cd infra/terraform
 cp terraform.tfvars.example terraform.tfvars
-# Replace the SEC contact address, then authenticate to AWS.
+# Replace the AWS account ID and SEC contact address, then authenticate to AWS.
 terraform init
 terraform plan
 ```

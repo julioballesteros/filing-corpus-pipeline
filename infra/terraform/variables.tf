@@ -4,6 +4,22 @@ variable "aws_region" {
   default     = "eu-west-1"
 }
 
+variable "allowed_account_ids" {
+  description = "AWS account IDs in which Terraform is permitted to operate."
+  type        = set(string)
+
+  validation {
+    condition = (
+      length(var.allowed_account_ids) > 0 &&
+      alltrue([
+        for account_id in var.allowed_account_ids :
+        can(regex("^[0-9]{12}$", account_id))
+      ])
+    )
+    error_message = "allowed_account_ids must contain at least one 12-digit AWS account ID."
+  }
+}
+
 variable "project_name" {
   description = "Short project name used in resource names and tags."
   type        = string

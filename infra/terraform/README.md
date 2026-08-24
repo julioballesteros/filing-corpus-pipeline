@@ -34,11 +34,15 @@ CloudWatch Logs, and X-Ray configuration.
 ```bash
 cd infra/terraform
 cp terraform.tfvars.example terraform.tfvars
-# Replace the example SEC contact address before continuing.
+# Replace the example AWS account ID and SEC contact address before continuing.
 terraform init
 terraform plan -out=discovery.tfplan
 terraform apply discovery.tfplan
 ```
+
+The AWS provider checks `allowed_account_ids` before planning or applying, so
+credentials for an unexpected account fail closed instead of creating a second
+copy of the stack there.
 
 The schedule is disabled by default. This prevents an apply from immediately
 making external requests and gives you a chance to verify a manual execution.

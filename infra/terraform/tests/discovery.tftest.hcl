@@ -54,7 +54,10 @@ run "default_discovery_slice" {
   command = plan
 
   variables {
-    sec_user_agent = "filing-corpus-pipeline ci@example.com"
+    allowed_account_ids = ["123456789012"]
+    lookback_days       = 7
+    schedule_enabled    = false
+    sec_user_agent      = "filing-corpus-pipeline ci@example.com"
   }
 
   assert {
@@ -105,12 +108,24 @@ run "default_discovery_slice" {
   }
 }
 
+run "invalid_account_allowlist" {
+  command = plan
+
+  variables {
+    allowed_account_ids = ["not-an-account-id"]
+    sec_user_agent      = "filing-corpus-pipeline ci@example.com"
+  }
+
+  expect_failures = [var.allowed_account_ids]
+}
+
 run "enabled_schedule" {
   command = plan
 
   variables {
-    sec_user_agent   = "filing-corpus-pipeline ci@example.com"
-    schedule_enabled = true
+    allowed_account_ids = ["123456789012"]
+    sec_user_agent      = "filing-corpus-pipeline ci@example.com"
+    schedule_enabled    = true
   }
 
   assert {
