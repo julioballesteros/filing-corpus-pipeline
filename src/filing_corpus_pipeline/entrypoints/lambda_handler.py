@@ -3,7 +3,7 @@
 import logging
 import os
 from collections.abc import Mapping
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from filing_corpus_pipeline.composition import build_sec_discovery_service
 from filing_corpus_pipeline.discovery import DiscoveryRequest
@@ -67,8 +67,7 @@ def parse_discovery_event(event: object) -> DiscoveryRequest:
         except ValueError as error:
             raise InvalidDiscoveryEvent(f"unsupported filing form: {error}") from error
 
-    filed_from = _required_date(payload, "filed_from")
-    filed_to = _required_date(payload, "filed_to")
+    filed_from, filed_to = _filing_date_range(payload)
     try:
         return DiscoveryRequest(
             issuers=tuple(
@@ -124,3 +123,57 @@ def _required_date(payload: Mapping[str, object], field: str) -> date:
         raise InvalidDiscoveryEvent(
             f"{field} must be an ISO date in YYYY-MM-DD format"
         ) from error
+
+
+def _filing_date_range(payload: Mapping[str, object]) -> tuple[date, date]:
+    exact_fields = ("filed_from", "filed_to")
+    rolling_fields = ("scheduled_at", "lookback_days")
+    has_exact_field = any(field in payload for field in exact_fields)
+    has_rolling_field = any(field in payload for field in rolling_fields)
+
+    if has_exact_field and has_rolling_field:
+        raise InvalidDiscoveryEvent(
+            "use either filed_from/filed_to or scheduled_at/lookback_days, not both"
+        )
+    if has_exact_field:
+        if not all(field in payload for field in exact_fields):
+            raise InvalidDiscoveryEvent(
+                "filed_from and filed_to must be provided together"
+            )
+        return (
+            _required_date(payload, "filed_from"),
+            _required_date(payload, "filed_to"),
+        )
+    if has_rolling_field:
+        if not all(field in payload for field in rolling_fields):
+            raise InvalidDiscoveryEvent(
+                "scheduled_at and lookback_days must be provided together"
+            )
+        scheduled_at = _required_datetime(payload, "scheduled_at")
+        lookback_days = payload["lookback_days"]
+        if (
+            isinstance(lookback_days, bool)
+            or not isinstance(lookback_days, int)
+            or lookback_days < 1
+        ):
+            raise InvalidDiscoveryEvent("lookback_days must be a positive integer")
+        filed_to = scheduled_at.astimezone(UTC).date()
+        return filed_to - timedelta(days=lookback_days), filed_to
+
+    raise InvalidDiscoveryEvent(
+        "provide filed_from/filed_to or scheduled_at/lookback_days"
+    )
+
+
+def _required_datetime(
+    payload: Mapping[str, object],
+    field: str,
+) -> datetime:
+    value = _required_string(payload, field)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise InvalidDiscoveryEvent(f"{field} must be an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise InvalidDiscoveryEvent(f"{field} must include a timezone offset")
+    return parsed

@@ -85,6 +85,20 @@ def test_parser_accepts_an_explicit_form_subset() -> None:
     assert request.forms == frozenset({FilingForm.TEN_Q})
 
 
+def test_parser_derives_a_rolling_window_from_scheduled_time() -> None:
+    """Scheduled runs produce deterministic UTC filing-date bounds."""
+    event = valid_event()
+    del event["filed_from"]
+    del event["filed_to"]
+    event["scheduled_at"] = "2025-03-01T00:30:00+01:00"
+    event["lookback_days"] = 7
+
+    request = lambda_handler.parse_discovery_event(event)
+
+    assert request.filed_to == date(2025, 2, 28)
+    assert request.filed_from == date(2025, 2, 21)
+
+
 @pytest.mark.parametrize(
     ("event", "message"),
     [
@@ -140,6 +154,47 @@ def test_parser_accepts_an_explicit_form_subset() -> None:
             },
             "filed_from must be on or before filed_to",
         ),
+        (
+            {
+                **valid_event(),
+                "scheduled_at": "2025-01-01T00:00:00Z",
+                "lookback_days": 7,
+            },
+            "not both",
+        ),
+        (
+            {
+                **valid_event(),
+                "filed_to": None,
+            },
+            "filed_to must be a non-empty string",
+        ),
+        (
+            {
+                "provider": "sec",
+                "issuer_ids": ["320193"],
+                "scheduled_at": "2025-01-01T00:00:00Z",
+            },
+            "scheduled_at and lookback_days must be provided together",
+        ),
+        (
+            {
+                "provider": "sec",
+                "issuer_ids": ["320193"],
+                "scheduled_at": "2025-01-01T00:00:00",
+                "lookback_days": 7,
+            },
+            "scheduled_at must include a timezone offset",
+        ),
+        (
+            {
+                "provider": "sec",
+                "issuer_ids": ["320193"],
+                "scheduled_at": "not-a-timestamp",
+                "lookback_days": 7,
+            },
+            "scheduled_at must be an ISO timestamp",
+        ),
     ],
 )
 def test_parser_rejects_invalid_workflow_input(
@@ -148,4 +203,18 @@ def test_parser_rejects_invalid_workflow_input(
 ) -> None:
     """Bad Step Functions input becomes a failed Lambda task."""
     with pytest.raises(InvalidDiscoveryEvent, match=message):
+        lambda_handler.parse_discovery_event(event)
+
+
+@pytest.mark.parametrize("lookback_days", [0, -1, 1.5, "7", True])
+def test_parser_rejects_invalid_lookback_days(lookback_days: object) -> None:
+    """A rolling window always uses a positive whole number of calendar days."""
+    event: dict[str, object] = {
+        "provider": "sec",
+        "issuer_ids": ["320193"],
+        "scheduled_at": "2025-01-01T00:00:00Z",
+        "lookback_days": lookback_days,
+    }
+
+    with pytest.raises(InvalidDiscoveryEvent, match="positive integer"):
         lambda_handler.parse_discovery_event(event)

@@ -74,6 +74,24 @@ must contain `SEC_USER_AGENT` with a declared application name and monitored
 contact address. Invalid input raises an exception so Step Functions records
 the task as failed rather than receiving a partial result.
 
+For recurring runs, EventBridge Scheduler supplies its execution time instead
+of fixed dates:
+
+```json
+{
+  "provider": "sec",
+  "issuer_ids": ["0000320193", "0000789019"],
+  "forms": ["10-K", "10-Q"],
+  "scheduled_at": "<aws.scheduler.scheduled-time>",
+  "lookback_days": 7
+}
+```
+
+The handler converts `scheduled_at` to UTC and subtracts `lookback_days` to
+produce the inclusive filing-date bounds. Exact and rolling date fields are
+mutually exclusive, making every scheduled execution deterministic and
+replayable.
+
 
 ## Quality checks
 
