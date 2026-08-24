@@ -45,10 +45,11 @@ worker's result.
 
 ## Atomic claim behavior
 
-The DynamoDB adapter starts with a conditional `UpdateItem`. The update succeeds
-only when the item is missing, has a retryable failure, has an expired lease, or
-is already owned by the same workflow execution. It also increments the attempt
-counter and refreshes source metadata atomically.
+The registry service asks its DynamoDB storage client to perform a conditional
+`UpdateItem`. The update succeeds only when the item is missing, has a retryable
+failure, has an expired lease, or is already owned by the same workflow
+execution. It also increments the attempt counter and refreshes source metadata
+atomically.
 
 When the condition fails, a strongly consistent projected read classifies the
 current item as:
@@ -71,6 +72,11 @@ the failed condition and classification.
   stack.
 - TTL is disabled because registry records provide durable provenance.
 - No secondary index is created until an operational query requires one.
+
+The concrete `registry` service owns state-transition and conflict policy. The
+`storage.dynamodb` client owns DynamoDB expressions, serialization, consistent
+reads, and SDK error translation. There is no abstract registry service because
+there is only one implementation today.
 
 The table is deployed now but has no runtime permissions or workflow coupling.
 The next acquisition Lambda will receive exact item-level API permissions on

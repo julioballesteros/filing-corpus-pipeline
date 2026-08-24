@@ -43,7 +43,10 @@ contact address and do not commit it to the repository.
 
 - `domain`: provider-neutral filing records passed between pipeline stages.
 - `discovery`: the discovery request, result, provider port, and use case.
-- `adapters/sec`: SEC-specific HTTP response parsing and record mapping.
+- `adapters/sec`: SEC retrieval, response parsing, and record mapping. Future
+  document providers belong beside it.
+- `registry`: filing claim models and the concrete registry service.
+- `storage`: narrow database clients and DynamoDB serialization details.
 - `entrypoints`: thin runtime composition for the local CLI and Lambda handler.
 
 Later acquisition and processing stages should consume `FilingReference`
@@ -92,12 +95,14 @@ produce the inclusive filing-date bounds. Exact and rolling date fields are
 mutually exclusive, making every scheduled execution deterministic and
 replayable.
 
-## AWS discovery slice
+## AWS discovery and registry slice
 
 Terraform under `infra/terraform` deploys the complete first vertical slice:
 
 ```text
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
+
+DynamoDB filing registry (ready for the next acquisition Map state)
 ```
 
 Step Functions owns the execution history and transient Lambda retry policy.
@@ -109,9 +114,24 @@ accounts with sufficient regional quota.
 
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
-logs, and only then enable recurring discovery. DynamoDB, object storage,
-queues, filing downloads, and document processing intentionally remain outside
-this slice.
+logs, and only then enable recurring discovery. The DynamoDB registry is not
+yet invoked by the workflow; object storage, filing downloads, queues, and
+document processing intentionally remain outside this slice.
+
+## Filing registry
+
+The registry uses the provider-qualified filing ID as its DynamoDB partition
+key. An acquisition worker claims work with one conditional update—never a
+race-prone read followed by a write. Claims carry an owner and an expiry, so a
+Step Functions retry can resume its own work and a later execution can recover
+an abandoned lease.
+
+The initial persisted states are `FETCHING`, `RAW_STORED`, and `FAILED`.
+Retryable failures can be reclaimed; permanent failures remain visible without
+being retried on every overlapping discovery run. Only the active owner may
+mark a filing stored or failed. See
+[`docs/filing-registry.md`](docs/filing-registry.md) for the item schema,
+transition rules, and recovery cases.
 
 To prepare a deployment:
 

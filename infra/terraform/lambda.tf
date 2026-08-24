@@ -6,6 +6,8 @@ data "archive_file" "discovery" {
   excludes = [
     "**/__pycache__/**",
     "**/*.pyc",
+    "filing_corpus_pipeline/registry/**",
+    "filing_corpus_pipeline/storage/**",
   ]
 
   output_file_mode = "0644"

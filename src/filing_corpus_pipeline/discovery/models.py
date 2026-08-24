@@ -32,7 +32,7 @@ class DiscoveryResult:
     issuers_scanned: int
 
     def to_dict(self) -> dict[str, int | list[dict[str, str | None]]]:
-        """Return the payload a future Lambda handler will return."""
+        """Return the payload passed from discovery to the parent workflow."""
         return {
             "issuers_scanned": self.issuers_scanned,
             "filings_found": len(self.filings),
