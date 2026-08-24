@@ -50,7 +50,7 @@ mock_provider "aws" {
   }
 }
 
-run "default_discovery_slice" {
+run "default_ingestion_slice" {
   command = plan
 
   variables {
@@ -106,6 +106,31 @@ run "default_discovery_slice" {
     )
     error_message = "The schedule must pass the configured lookback window."
   }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.billing_mode == "PAY_PER_REQUEST"
+    error_message = "The portfolio-scale registry must avoid provisioned idle capacity."
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.hash_key == "filing_key"
+    error_message = "The registry must use the provider-qualified filing identity."
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.point_in_time_recovery[0].enabled
+    error_message = "The registry must have point-in-time recovery enabled."
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.server_side_encryption[0].enabled
+    error_message = "The registry must be encrypted at rest."
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.deletion_protection_enabled == false
+    error_message = "Deletion protection must remain opt-in for the disposable dev stack."
+  }
 }
 
 run "invalid_account_allowlist" {
@@ -123,10 +148,11 @@ run "enabled_schedule" {
   command = plan
 
   variables {
-    allowed_account_ids         = ["123456789012"]
-    lambda_reserved_concurrency = 1
-    sec_user_agent              = "filing-corpus-pipeline ci@example.com"
-    schedule_enabled            = true
+    allowed_account_ids                  = ["123456789012"]
+    lambda_reserved_concurrency          = 1
+    registry_deletion_protection_enabled = true
+    sec_user_agent                       = "filing-corpus-pipeline ci@example.com"
+    schedule_enabled                     = true
   }
 
   assert {
@@ -137,5 +163,10 @@ run "enabled_schedule" {
   assert {
     condition     = aws_lambda_function.discovery.reserved_concurrent_executions == 1
     error_message = "Reserved concurrency must be configurable when quota permits."
+  }
+
+  assert {
+    condition     = aws_dynamodb_table.filing_registry.deletion_protection_enabled
+    error_message = "Registry deletion protection must be configurable for long-lived stacks."
   }
 }

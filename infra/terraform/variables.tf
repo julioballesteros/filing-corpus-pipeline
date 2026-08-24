@@ -140,6 +140,12 @@ variable "log_retention_days" {
   }
 }
 
+variable "registry_deletion_protection_enabled" {
+  description = "Protect the filing registry from Terraform and API deletion."
+  type        = bool
+  default     = false
+}
+
 variable "lambda_reserved_concurrency" {
   description = "Optional Lambda concurrency reservation; null uses regional unreserved concurrency."
   type        = number

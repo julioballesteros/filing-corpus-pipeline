@@ -5,6 +5,7 @@ locals {
   state_machine_name   = "${local.name_prefix}-discovery"
   schedule_name        = "${local.name_prefix}-discovery"
   schedule_group_name  = local.name_prefix
+  registry_table_name  = "${local.name_prefix}-filing-registry"
 
   common_tags = {
     Environment = var.environment

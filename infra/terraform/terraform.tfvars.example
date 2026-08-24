@@ -20,3 +20,7 @@ schedule_enabled = false
 # Leave unset in quota-constrained accounts. Enable only after confirming that
 # the regional Lambda concurrency quota has enough unreserved headroom.
 # lambda_reserved_concurrency = 1
+
+# Keep false while iterating locally. Enable for a long-lived environment after
+# verifying the destroy/recovery procedure.
+registry_deletion_protection_enabled = false

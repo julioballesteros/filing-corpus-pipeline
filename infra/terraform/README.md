@@ -1,9 +1,11 @@
-# Discovery infrastructure
+# Ingestion infrastructure
 
 This Terraform stack deploys the first asynchronous ingestion slice:
 
 ```text
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
+
+DynamoDB filing registry (not connected until the acquisition Lambda is added)
 ```
 
 The state machine is the execution record and retry boundary. It invokes the
@@ -17,19 +19,22 @@ response envelope.
 - a Standard Step Functions state machine with transient Lambda retries;
 - an EventBridge schedule with a deterministic rolling-window input;
 - least-privilege execution roles for the three services;
-- retained JSON Lambda logs, complete workflow logs, and X-Ray tracing; and
+- retained JSON Lambda logs, complete workflow logs, and X-Ray tracing;
 - a five-company watchlist limit and three-minute Lambda timeout to bound work
-  per execution and SEC request pressure.
+  per execution and SEC request pressure; and
+- an on-demand, encrypted DynamoDB filing registry with point-in-time recovery.
 
-No database, queue, object store, downloader, or document processor is created
-in this slice. Terraform state is local for now; a remote backend should be
-bootstrapped before multiple people or automated deployment share this stack.
+The registry is intentionally not connected to discovery. The acquisition
+Lambda will receive narrowly scoped item permissions and use it from each Map
+iteration. No queue, object store, downloader, or document processor is created
+yet. Terraform state is local for now; a remote backend should be bootstrapped
+before multiple people or automated deployment share this stack.
 
 ## Deploy
 
 Prerequisites are Terraform 1.14+, AWS credentials for the target account, and
 permission to manage Lambda, IAM, Step Functions, EventBridge Scheduler,
-CloudWatch Logs, and X-Ray configuration.
+CloudWatch Logs, X-Ray configuration, and DynamoDB.
 
 ```bash
 cd infra/terraform
@@ -37,8 +42,8 @@ cp terraform.tfvars.example terraform.tfvars
 # Replace the example AWS account ID and SEC contact address before continuing.
 aws sts get-caller-identity
 terraform init
-terraform plan -out=discovery.tfplan
-terraform apply discovery.tfplan
+terraform plan -out=ingestion.tfplan
+terraform apply ingestion.tfplan
 ```
 
 The AWS provider checks `allowed_account_ids` before planning or applying, so
@@ -74,6 +79,11 @@ Once the smoke test succeeds, set `schedule_enabled = true`, review another
 plan, and apply it. EventBridge replaces `<aws.scheduler.scheduled-time>` for
 each invocation; the Lambda derives and logs the inclusive discovery window.
 
+The registry table uses `filing_key` as its only key and has no speculative
+secondary indexes or TTL. Registry records are provenance and recovery state,
+so they are retained. Enable `registry_deletion_protection_enabled` for a
+long-lived environment after verifying the backup and teardown procedures.
+
 ## Reconfigure or remove
 
 Change the watchlist, forms, lookback, frequency, or log retention through
@@ -83,3 +93,6 @@ resources, set `schedule_enabled = false` and apply. To remove the whole slice:
 ```bash
 terraform destroy
 ```
+
+Deletion protection must be disabled and applied before Terraform can destroy
+the registry table.

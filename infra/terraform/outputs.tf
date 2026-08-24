@@ -22,3 +22,13 @@ output "schedule_state" {
   description = "Whether recurring discovery is currently enabled."
   value       = aws_scheduler_schedule.discovery.state
 }
+
+output "filing_registry_table_name" {
+  description = "DynamoDB table used for atomic filing claims and acquisition state."
+  value       = aws_dynamodb_table.filing_registry.name
+}
+
+output "filing_registry_table_arn" {
+  description = "ARN of the DynamoDB filing registry table."
+  value       = aws_dynamodb_table.filing_registry.arn
+}
