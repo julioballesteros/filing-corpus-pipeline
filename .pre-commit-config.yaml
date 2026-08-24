@@ -1,0 +1,41 @@
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: uv lockfile
+        entry: uv lock --check
+        language: unsupported
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      - id: ruff
+        name: Ruff lint and import sorting
+        entry: uv run --locked --no-sync ruff check --fix --exit-non-zero-on-fix
+        language: unsupported
+        types_or: [python, pyi]
+
+      - id: black
+        name: Black formatting
+        entry: uv run --locked --no-sync black
+        language: unsupported
+        types_or: [python, pyi]
+
+      - id: mypy
+        name: mypy type checking
+        entry: uv run --locked --no-sync mypy
+        language: unsupported
+        pass_filenames: false
+        types_or: [python, pyi]
