@@ -49,6 +49,31 @@ contact address and do not commit it to the repository.
 Later acquisition and processing stages should consume `FilingReference`
 records without depending on SEC response formats.
 
+## Lambda discovery contract
+
+Configure the Lambda handler as:
+
+```text
+filing_corpus_pipeline.entrypoints.lambda_handler.handler
+```
+
+The parent workflow invokes it with an explicit, replayable date range:
+
+```json
+{
+  "provider": "sec",
+  "issuer_ids": ["0000320193", "0000789019"],
+  "forms": ["10-K", "10-Q"],
+  "filed_from": "2025-01-01",
+  "filed_to": "2025-12-31"
+}
+```
+
+`forms` may be omitted to select both supported forms. The Lambda environment
+must contain `SEC_USER_AGENT` with a declared application name and monitored
+contact address. Invalid input raises an exception so Step Functions records
+the task as failed rather than receiving a partial result.
+
 
 ## Quality checks
 

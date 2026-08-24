@@ -7,23 +7,9 @@ from collections.abc import Sequence
 from datetime import date
 from typing import cast
 
-from filing_corpus_pipeline.adapters.http import UrllibJsonTransport
-from filing_corpus_pipeline.adapters.sec import (
-    SecClientConfig,
-    SecFilingDiscoverySource,
-    SecSubmissionsClient,
-)
-from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryService
+from filing_corpus_pipeline.composition import build_sec_discovery_service
+from filing_corpus_pipeline.discovery import DiscoveryRequest
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
-
-
-def build_sec_discovery_service(user_agent: str) -> DiscoveryService:
-    """Compose the SEC adapter and provider-independent discovery service."""
-    client = SecSubmissionsClient(
-        transport=UrllibJsonTransport(),
-        config=SecClientConfig(user_agent=user_agent),
-    )
-    return DiscoveryService(SecFilingDiscoverySource(client))
 
 
 def build_parser() -> argparse.ArgumentParser:

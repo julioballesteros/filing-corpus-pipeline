@@ -1,0 +1,151 @@
+"""Tests for the AWS Lambda discovery adapter."""
+
+from datetime import date
+
+import pytest
+
+from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryResult
+from filing_corpus_pipeline.domain import FilingForm
+from filing_corpus_pipeline.entrypoints import lambda_handler
+from filing_corpus_pipeline.entrypoints.lambda_handler import (
+    InvalidDiscoveryEvent,
+    LambdaConfigurationError,
+)
+
+
+class CapturingService:
+    """Capture application input without reaching the SEC endpoint."""
+
+    def __init__(self) -> None:
+        self.request: DiscoveryRequest | None = None
+
+    def execute(self, request: DiscoveryRequest) -> DiscoveryResult:
+        self.request = request
+        return DiscoveryResult(filings=(), issuers_scanned=len(request.issuers))
+
+
+def valid_event() -> dict[str, object]:
+    """Return the minimal explicit parent-workflow payload."""
+    return {
+        "provider": "sec",
+        "issuer_ids": ["320193", "320193", "789019"],
+        "filed_from": "2025-01-01",
+        "filed_to": "2025-12-31",
+    }
+
+
+def test_handler_executes_discovery_and_returns_json_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Lambda adapter composes configuration around the discovery use case."""
+    service = CapturingService()
+    user_agents: list[str] = []
+
+    def build_service(user_agent: str) -> CapturingService:
+        user_agents.append(user_agent)
+        return service
+
+    monkeypatch.setattr(lambda_handler, "build_sec_discovery_service", build_service)
+    monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
+
+    result = lambda_handler.handler(valid_event(), object())
+
+    assert result == {
+        "filings": [],
+        "filings_found": 0,
+        "issuers_scanned": 2,
+    }
+    assert user_agents == ["pipeline contact@example.com"]
+    assert service.request is not None
+    assert [issuer.provider_issuer_id for issuer in service.request.issuers] == [
+        "320193",
+        "789019",
+    ]
+    assert service.request.forms == frozenset(FilingForm)
+    assert service.request.filed_from == date(2025, 1, 1)
+
+
+def test_handler_requires_sec_user_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing runtime identity fails before making an external request."""
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+
+    with pytest.raises(LambdaConfigurationError, match="SEC_USER_AGENT"):
+        lambda_handler.handler(valid_event(), object())
+
+
+def test_parser_accepts_an_explicit_form_subset() -> None:
+    """The parent workflow can restrict a run to one supported form."""
+    event = valid_event()
+    event["forms"] = ["10-Q"]
+
+    request = lambda_handler.parse_discovery_event(event)
+
+    assert request.forms == frozenset({FilingForm.TEN_Q})
+
+
+@pytest.mark.parametrize(
+    ("event", "message"),
+    [
+        ([], "event must be a JSON object"),
+        ({}, "provider must be a non-empty string"),
+        (
+            {
+                **valid_event(),
+                "provider": "other",
+            },
+            "unsupported provider",
+        ),
+        (
+            {
+                **valid_event(),
+                "issuer_ids": "320193",
+            },
+            "issuer_ids must be an array",
+        ),
+        (
+            {
+                **valid_event(),
+                "issuer_ids": [],
+            },
+            "issuer_ids must not be empty",
+        ),
+        (
+            {
+                **valid_event(),
+                "forms": ["8-K"],
+            },
+            "unsupported filing form",
+        ),
+        (
+            {
+                **valid_event(),
+                "forms": [],
+            },
+            "at least one filing form",
+        ),
+        (
+            {
+                **valid_event(),
+                "filed_from": "not-a-date",
+            },
+            "filed_from must be an ISO date",
+        ),
+        (
+            {
+                **valid_event(),
+                "filed_from": "2026-01-01",
+                "filed_to": "2025-01-01",
+            },
+            "filed_from must be on or before filed_to",
+        ),
+    ],
+)
+def test_parser_rejects_invalid_workflow_input(
+    event: object,
+    message: str,
+) -> None:
+    """Bad Step Functions input becomes a failed Lambda task."""
+    with pytest.raises(InvalidDiscoveryEvent, match=message):
+        lambda_handler.parse_discovery_event(event)
