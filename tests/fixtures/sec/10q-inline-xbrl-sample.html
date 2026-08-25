@@ -1,0 +1,43 @@
+<!doctype html>
+<html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL">
+  <head>
+    <meta charset="utf-8">
+    <title>Example Holdings — Quarterly Report</title>
+    <style>.unused { display: none; }</style>
+    <script>window.notCorpusContent = "SCRIPT_SENTINEL";</script>
+  </head>
+  <body>
+    <ix:header>
+      <ix:hidden>HIDDEN_XBRL_SENTINEL</ix:hidden>
+      <ix:references>REFERENCE_SENTINEL</ix:references>
+    </ix:header>
+    <noscript>NOSCRIPT_SENTINEL</noscript>
+    <div style="display: none">CSS_HIDDEN_SENTINEL</div>
+
+    <table aria-label="table of contents">
+      <tr><td><a href="#item1">Item 1. Financial Statements</a></td><td>3</td></tr>
+      <tr><td><a href="#item2">Item 2. Management's Discussion and Analysis</a></td><td>8</td></tr>
+    </table>
+
+    <div><span>PART I</span></div>
+    <div id="item1"><b>ITEM 1. FINANCIAL STATEMENTS</b></div>
+    <p>Condensed financial statements follow for the current quarter.</p>
+    <table>
+      <tr><th>Metric</th><th>Current quarter</th></tr>
+      <tr>
+        <td>Revenue</td>
+        <td><ix:nonFraction name="example:Revenue">125,000</ix:nonFraction></td>
+      </tr>
+    </table>
+
+    <div id="item2"><span>ITEM 2. MANAGEMENT'S DISCUSSION AND ANALYSIS</span></div>
+    <p>
+      Demand increased during the quarter, while management expects supply
+      constraints to moderate in the second half.
+    </p>
+
+    <h2>PART II</h2>
+    <div><strong>ITEM 1A. RISK FACTORS</strong></div>
+    <p>Market volatility and supplier concentration could affect future results.</p>
+  </body>
+</html>

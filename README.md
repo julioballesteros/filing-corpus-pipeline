@@ -44,6 +44,8 @@ contact address and do not commit it to the repository.
 - `domain`: provider-neutral filing records passed between pipeline stages.
 - `discovery`: the discovery request, result, provider port, and use case.
 - `acquisition`: raw-document retrieval orchestration and its provider contract.
+- `normalization`: deterministic SEC HTML parsing, section classification, data
+  quality findings, and versioned corpus artifact rendering.
 - `adapters/sec`: SEC metadata/document retrieval, response parsing, and record
   mapping. Future document providers belong beside it.
 - `registry`: filing claim models and the concrete registry service.
@@ -51,8 +53,8 @@ contact address and do not commit it to the repository.
 - `entrypoints`: separate thin handlers for discovery and acquisition plus the
   local discovery CLI.
 
-Acquisition and later processing stages consume `FilingReference` records
-without depending on SEC response formats.
+Acquisition and normalization consume `FilingReference` records without
+depending on SEC metadata response formats.
 
 ## Lambda discovery contract
 
@@ -136,9 +138,11 @@ EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
 ```
 
 Step Functions owns the execution history, per-filing concurrency, and retry
-policy. Both Lambdas use small, dependency-free source ZIPs with explicit
-handlers, resource bounds, JSON logs, retained CloudWatch log groups, and X-Ray
-tracing.
+policy. The two deployed Lambdas use small, dependency-free source ZIPs with
+explicit handlers, resource bounds, JSON logs, retained CloudWatch log groups,
+and X-Ray tracing. Their packages explicitly exclude the local normalizer and
+its compiled HTML-parser dependency until a dedicated normalization Lambda is
+added.
 EventBridge sends the scheduled timestamp plus the configured watchlist and
 lookback window. Reserved concurrency is available as an opt-in control for AWS
 accounts with sufficient regional quota.
@@ -146,8 +150,25 @@ accounts with sufficient regional quota.
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
 logs, verify the corresponding registry records and raw objects, and only then
-enable recurring ingestion. Extraction and document processing remain later
-stages.
+enable recurring ingestion. Deployment and persistence of document processing
+remain later workflow stages; deterministic document normalization is
+implemented and tested locally.
+
+## Local document normalization
+
+The first processing round converts one acquired SEC primary HTML document
+into a provider-neutral `NormalizedDocument`. It removes non-content and hidden
+inline-XBRL infrastructure, emits ordered text/table blocks, maps 10-K and 10-Q
+Item headings to canonical section names, and reports non-fatal quality
+findings. The result renders as a self-describing `manifest.json` plus
+reproducible `blocks.jsonl.gz` bytes.
+
+This round deliberately has no AWS reads or writes, registry transitions,
+Lambda handler, or Step Functions state. Those integration concerns form the
+next slice. Semantic XBRL fact extraction also remains a separate future stage;
+the normalizer preserves visible inline-XBRL values as document text and table
+cells. See [`docs/normalization.md`](docs/normalization.md) for contracts,
+failure policy, versioning, and local usage.
 
 ## Filing registry
 

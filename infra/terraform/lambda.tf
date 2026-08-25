@@ -9,6 +9,7 @@ data "archive_file" "discovery" {
     "filing_corpus_pipeline/acquisition/**",
     "filing_corpus_pipeline/adapters/sec/documents.py",
     "filing_corpus_pipeline/entrypoints/acquisition_lambda.py",
+    "filing_corpus_pipeline/normalization/**",
     "filing_corpus_pipeline/registry/**",
     "filing_corpus_pipeline/storage/**",
   ]
@@ -30,6 +31,7 @@ data "archive_file" "acquisition" {
     "filing_corpus_pipeline/discovery/**",
     "filing_corpus_pipeline/entrypoints/cli.py",
     "filing_corpus_pipeline/entrypoints/discovery_lambda.py",
+    "filing_corpus_pipeline/normalization/**",
   ]
 
   output_file_mode = "0644"
