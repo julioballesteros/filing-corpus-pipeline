@@ -122,6 +122,18 @@ class RawDocumentMetadata:
             if value is not None:
                 _require_nonempty(value, field=field)
 
+    def to_dict(self) -> dict[str, str | int | None]:
+        """Return the workflow-safe durable object identity."""
+        return {
+            "bucket": self.bucket,
+            "key": self.key,
+            "sha256": self.sha256.lower(),
+            "content_length": self.content_length,
+            "content_type": self.content_type,
+            "version_id": self.version_id,
+            "etag": self.etag,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class MarkRawStoredRequest:

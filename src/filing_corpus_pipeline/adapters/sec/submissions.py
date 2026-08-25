@@ -10,6 +10,7 @@ from filing_corpus_pipeline.adapters.http import (
     HttpTransportError,
     JsonHttpTransport,
 )
+from filing_corpus_pipeline.adapters.sec.identifiers import normalize_cik
 
 SEC_DATA_BASE_URL = "https://data.sec.gov/submissions"
 
@@ -146,14 +147,6 @@ class SecSubmissionsClient:
                 self._sleep(backoff)
 
         raise AssertionError("retry loop completed without returning or raising")
-
-
-def normalize_cik(value: str) -> str:
-    """Return the ten-digit CIK form required by data.sec.gov."""
-    stripped = value.strip()
-    if not stripped.isascii() or not stripped.isdigit() or len(stripped) > 10:
-        raise ValueError(f"invalid SEC CIK: {value!r}")
-    return stripped.zfill(10)
 
 
 def _parse_submission_rows(

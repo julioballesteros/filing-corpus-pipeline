@@ -1,10 +1,9 @@
 """Map SEC submission metadata to the provider-neutral discovery contract."""
 
+from filing_corpus_pipeline.adapters.sec.constants import SEC_ARCHIVE_BASE_URL
 from filing_corpus_pipeline.adapters.sec.submissions import SecSubmissionsClient
 from filing_corpus_pipeline.discovery import DiscoveryRequest
 from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
-
-SEC_ARCHIVE_BASE_URL = "https://www.sec.gov/Archives/edgar/data"
 
 
 class SecFilingDiscoverySource:

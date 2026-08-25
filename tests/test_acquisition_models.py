@@ -97,6 +97,20 @@ def test_acquisition_result_enforces_document_invariant() -> None:
     )
 
     assert stored.document is not None
+    assert stored.to_dict() == {
+        "filing_key": "sec#filing",
+        "outcome": "RAW_STORED",
+        "attempt_count": 1,
+        "document": {
+            "bucket": "bucket",
+            "key": "key",
+            "sha256": "a" * 64,
+            "content_length": 10,
+            "content_type": "text/html",
+            "version_id": None,
+            "etag": None,
+        },
+    }
     with pytest.raises(ValueError, match="required only"):
         AcquisitionResult("sec#filing", AcquisitionOutcome.RAW_STORED, 1)
     with pytest.raises(ValueError, match="required only"):
@@ -110,6 +124,13 @@ def test_acquisition_result_enforces_document_invariant() -> None:
         AcquisitionResult("", AcquisitionOutcome.ALREADY_COMPLETED, 1)
     with pytest.raises(ValueError):
         AcquisitionResult("sec#filing", AcquisitionOutcome.ALREADY_COMPLETED, 0)
+
+    duplicate = AcquisitionResult(
+        "sec#filing",
+        AcquisitionOutcome.ALREADY_COMPLETED,
+        1,
+    )
+    assert duplicate.to_dict()["document"] is None
 
 
 @pytest.mark.parametrize(

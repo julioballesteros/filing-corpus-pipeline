@@ -7,13 +7,13 @@ import pytest
 
 from filing_corpus_pipeline.adapters.http import HttpTransportError
 from filing_corpus_pipeline.adapters.sec.discovery import SecFilingDiscoverySource
+from filing_corpus_pipeline.adapters.sec.identifiers import normalize_cik
 from filing_corpus_pipeline.adapters.sec.submissions import (
     SEC_DATA_BASE_URL,
     SecClientConfig,
     SecRequestError,
     SecResponseError,
     SecSubmissionsClient,
-    normalize_cik,
 )
 from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryService
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference

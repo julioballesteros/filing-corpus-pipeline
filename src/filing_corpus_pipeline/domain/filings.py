@@ -1,8 +1,10 @@
 """Provider-neutral filing identifiers passed between pipeline stages."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Self
 
 
 class FilingForm(StrEnum):
@@ -75,3 +77,81 @@ class FilingReference:
             "filing_detail_url": self.filing_detail_url,
             "primary_document_url": self.primary_document_url,
         }
+
+    @classmethod
+    def from_dict(cls, value: object) -> Self:
+        """Parse the JSON-compatible contract emitted by discovery."""
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) for key in value
+        ):
+            raise ValueError("filing must be a JSON object")
+        payload: Mapping[str, object] = value
+        provider = _required_string(payload, "provider")
+        try:
+            form = FilingForm(_required_string(payload, "form"))
+        except ValueError as error:
+            raise ValueError("form must be 10-K or 10-Q") from error
+
+        accepted_at = _optional_datetime(payload, "accepted_at")
+        if accepted_at is not None and (
+            accepted_at.tzinfo is None or accepted_at.utcoffset() is None
+        ):
+            raise ValueError("accepted_at must include a timezone offset")
+        return cls(
+            provider=provider,
+            provider_filing_id=_required_string(payload, "provider_filing_id"),
+            issuer=IssuerReference(
+                provider=provider,
+                provider_issuer_id=_required_string(
+                    payload,
+                    "provider_issuer_id",
+                ),
+            ),
+            issuer_name=_required_string(payload, "issuer_name"),
+            form=form,
+            filed_on=_required_date(payload, "filed_on"),
+            report_date=_optional_date(payload, "report_date"),
+            accepted_at=accepted_at,
+            primary_document=_required_string(payload, "primary_document"),
+            filing_detail_url=_required_string(payload, "filing_detail_url"),
+            primary_document_url=_required_string(payload, "primary_document_url"),
+        )
+
+
+def _required_string(payload: Mapping[str, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _required_date(payload: Mapping[str, object], field: str) -> date:
+    value = _required_string(payload, field)
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{field} must be an ISO date") from error
+
+
+def _optional_date(payload: Mapping[str, object], field: str) -> date | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO date or null")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{field} must be an ISO date or null") from error
+
+
+def _optional_datetime(payload: Mapping[str, object], field: str) -> datetime | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO timestamp or null")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{field} must be an ISO timestamp or null") from error

@@ -5,9 +5,10 @@ import os
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 
-from filing_corpus_pipeline.composition import build_sec_discovery_service
 from filing_corpus_pipeline.discovery import DiscoveryRequest
+from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
+from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 
 LOGGER = logging.getLogger(__name__)
 SUPPORTED_PROVIDER = "sec"
@@ -15,10 +16,6 @@ SUPPORTED_PROVIDER = "sec"
 
 class InvalidDiscoveryEvent(ValueError):
     """Raised when the Step Functions input violates the discovery contract."""
-
-
-class LambdaConfigurationError(RuntimeError):
-    """Raised when required Lambda environment configuration is absent."""
 
 
 def handler(

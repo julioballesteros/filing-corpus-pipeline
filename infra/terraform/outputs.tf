@@ -1,11 +1,21 @@
-output "lambda_function_name" {
+output "discovery_lambda_function_name" {
   description = "Deployed discovery Lambda function name."
   value       = aws_lambda_function.discovery.function_name
 }
 
-output "lambda_function_arn" {
+output "discovery_lambda_function_arn" {
   description = "Deployed discovery Lambda function ARN."
   value       = aws_lambda_function.discovery.arn
+}
+
+output "acquisition_lambda_function_name" {
+  description = "Deployed acquisition Lambda function name."
+  value       = aws_lambda_function.acquisition.function_name
+}
+
+output "acquisition_lambda_function_arn" {
+  description = "Deployed acquisition Lambda function ARN."
+  value       = aws_lambda_function.acquisition.arn
 }
 
 output "state_machine_arn" {

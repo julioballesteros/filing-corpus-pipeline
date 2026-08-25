@@ -7,6 +7,14 @@ mock_provider "aws" {
     }
   }
 
+  override_resource {
+    target          = aws_lambda_function.acquisition
+    override_during = plan
+    values = {
+      arn = "arn:aws:lambda:eu-west-1:123456789012:function:filing-corpus-pipeline-dev-acquisition"
+    }
+  }
+
   override_data {
     target          = data.aws_caller_identity.current
     override_during = plan
@@ -23,7 +31,14 @@ mock_provider "aws" {
   }
 
   override_data {
-    target = data.aws_iam_policy_document.lambda_runtime
+    target = data.aws_iam_policy_document.discovery_lambda_runtime
+    values = {
+      json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.acquisition_lambda_runtime
     values = {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
     }
@@ -83,14 +98,80 @@ run "default_ingestion_slice" {
   assert {
     condition = (
       aws_lambda_function.discovery.handler ==
-      "filing_corpus_pipeline.entrypoints.lambda_handler.handler"
+      "filing_corpus_pipeline.entrypoints.discovery_lambda.handler"
     )
     error_message = "The Lambda must use the discovery handler."
   }
 
   assert {
+    condition = (
+      aws_lambda_function.acquisition.handler ==
+      "filing_corpus_pipeline.entrypoints.acquisition_lambda.handler"
+    )
+    error_message = "The acquisition Lambda must have its own explicit handler."
+  }
+
+  assert {
+    condition     = aws_lambda_function.acquisition.timeout == 90
+    error_message = "The acquisition Lambda must have a bounded execution timeout."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.acquisition.environment[0].variables.MAX_DOCUMENT_BYTES ==
+      "26214400"
+    )
+    error_message = "The acquisition Lambda must receive its document-size bound."
+  }
+
+  assert {
     condition     = aws_lambda_function.discovery.reserved_concurrent_executions == null
     error_message = "Reserved concurrency must be opt-in for quota-constrained accounts."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.DiscoverFilings.Next == "AcquireFilings"
+    )
+    error_message = "Discovery must hand its filing list to acquisition."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.Type == "Map" &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.MaxConcurrency == 2
+    )
+    error_message = "Acquisition must use the bounded Map concurrency."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.AcquireFiling
+      .Parameters.Payload["owner_id.$"] == "$$.Execution.Id"
+    )
+    error_message = "Each acquisition claim must use the workflow execution ID."
+  }
+
+  assert {
+    condition = contains(
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.AcquireFiling.Retry[0].ErrorEquals,
+      "RetryableAcquisitionError",
+    )
+    error_message = "The workflow must retry failures classified as transient."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.AcquisitionFailed
+      .Parameters.outcome == "FAILED"
+    )
+    error_message = "One failed filing must become an isolated Map result."
   }
 
   assert {
@@ -216,11 +297,11 @@ run "enabled_schedule" {
   command = plan
 
   variables {
-    allowed_account_ids                  = ["123456789012"]
-    lambda_reserved_concurrency          = 1
-    registry_deletion_protection_enabled = true
-    sec_user_agent                       = "filing-corpus-pipeline ci@example.com"
-    schedule_enabled                     = true
+    allowed_account_ids                   = ["123456789012"]
+    discovery_lambda_reserved_concurrency = 1
+    registry_deletion_protection_enabled  = true
+    sec_user_agent                        = "filing-corpus-pipeline ci@example.com"
+    schedule_enabled                      = true
   }
 
   assert {

@@ -78,8 +78,7 @@ The concrete `registry` service owns state-transition and conflict policy. The
 reads, and SDK error translation. There is no abstract registry service because
 there is only one implementation today.
 
-The table is deployed now but has no acquisition runtime permissions or
-workflow coupling. The acquisition service implements these transitions
-locally. Its next Lambda composition will receive exact item-level API
-permissions on this table and supply the Step Functions execution ID as
-`claim_owner`.
+The acquisition Lambda has only `GetItem` and `UpdateItem` access to this table.
+Step Functions supplies its execution ID as `claim_owner`, so all retries within
+one execution recover the same claim identity while overlapping executions are
+isolated by the lease.

@@ -1,11 +1,12 @@
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
-  lambda_function_name = "${local.name_prefix}-discovery"
-  state_machine_name   = "${local.name_prefix}-discovery"
-  schedule_name        = "${local.name_prefix}-discovery"
-  schedule_group_name  = local.name_prefix
-  registry_table_name  = "${local.name_prefix}-filing-registry"
+  discovery_lambda_function_name   = "${local.name_prefix}-discovery"
+  acquisition_lambda_function_name = "${local.name_prefix}-acquisition"
+  state_machine_name               = "${local.name_prefix}-discovery"
+  schedule_name                    = "${local.name_prefix}-discovery"
+  schedule_group_name              = local.name_prefix
+  registry_table_name              = "${local.name_prefix}-filing-registry"
   raw_bucket_name = format(
     "%s-raw-%s-%s",
     substr(local.name_prefix, 0, 30),
@@ -17,6 +18,6 @@ locals {
     Environment = var.environment
     ManagedBy   = "Terraform"
     Project     = var.project_name
-    Service     = "filing-discovery"
+    Service     = "filing-ingestion"
   }
 }

@@ -48,7 +48,8 @@ contact address and do not commit it to the repository.
   mapping. Future document providers belong beside it.
 - `registry`: filing claim models and the concrete registry service.
 - `storage`: narrow DynamoDB and S3 clients plus SDK serialization details.
-- `entrypoints`: thin runtime composition for the local CLI and Lambda handler.
+- `entrypoints`: separate thin handlers for discovery and acquisition plus the
+  local discovery CLI.
 
 Acquisition and later processing stages consume `FilingReference` records
 without depending on SEC response formats.
@@ -58,7 +59,7 @@ without depending on SEC response formats.
 Configure the Lambda handler as:
 
 ```text
-filing_corpus_pipeline.entrypoints.lambda_handler.handler
+filing_corpus_pipeline.entrypoints.discovery_lambda.handler
 ```
 
 The parent workflow invokes it with an explicit, replayable date range:
@@ -96,31 +97,57 @@ produce the inclusive filing-date bounds. Exact and rolling date fields are
 mutually exclusive, making every scheduled execution deterministic and
 replayable.
 
-## AWS discovery and registry slice
+## Lambda acquisition contract
+
+Each Step Functions `Map` iteration invokes the dedicated acquisition handler:
+
+```text
+filing_corpus_pipeline.entrypoints.acquisition_lambda.handler
+```
+
+Its event contains one discovery record, the workflow execution ARN used as the
+claim owner, and the Task entry time used to start the lease:
+
+```json
+{
+  "filing": { "provider": "sec", "provider_filing_id": "..." },
+  "owner_id": "arn:aws:states:...:execution:...",
+  "requested_at": "2025-08-01T18:00:00Z"
+}
+```
+
+Feature-specific composition lives in `discovery/composition.py` and
+`acquisition/composition.py`; the handlers only validate runtime input and
+configuration, call their service, log the bounded result, and serialize it.
+
+## AWS ingestion slice
 
 Terraform under `infra/terraform` deploys the complete first vertical slice:
 
 ```text
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
-
-DynamoDB filing registry (ready for the next acquisition Map state)
-S3 raw-document bucket (ready for the next acquisition Map state)
+                                            |
+                                            +-> bounded Map
+                                                  |
+                                                  +-> acquisition Lambda
+                                                        |-> SEC document
+                                                        |-> DynamoDB registry
+                                                        +-> S3 raw object
 ```
 
-Step Functions owns the execution history and transient Lambda retry policy.
-The Lambda is a small, dependency-free ZIP deployment with a bounded watchlist
-and timeout, JSON logs, retained CloudWatch log groups, and X-Ray tracing.
+Step Functions owns the execution history, per-filing concurrency, and retry
+policy. Both Lambdas use small, dependency-free source ZIPs with explicit
+handlers, resource bounds, JSON logs, retained CloudWatch log groups, and X-Ray
+tracing.
 EventBridge sends the scheduled timestamp plus the configured watchlist and
 lookback window. Reserved concurrency is available as an opt-in control for AWS
 accounts with sufficient regional quota.
 
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
-logs, and only then enable recurring discovery. The DynamoDB registry is not
-yet invoked by the workflow, and the S3 bucket does not yet receive objects.
-The locally tested acquisition service is implemented, but its Lambda,
-permissions, and workflow `Map` integration remain outside this deployed slice.
-Document processing remains a later stage.
+logs, verify the corresponding registry records and raw objects, and only then
+enable recurring ingestion. Extraction and document processing remain later
+stages.
 
 ## Filing registry
 

@@ -32,6 +32,7 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 infra/terraform/discovery-lambda.zip
+infra/terraform/acquisition-lambda.zip
 
 # Editors and operating systems
 .DS_Store

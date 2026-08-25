@@ -144,3 +144,36 @@ def test_filing_reference_requires_matching_provider() -> None:
             valid,
             issuer=IssuerReference("other", "issuer-1"),
         )
+
+
+def test_filing_reference_round_trips_its_workflow_contract() -> None:
+    """Acquisition reconstructs the exact provider-neutral discovery record."""
+    filing = filing_reference("0000320193-25-000001")
+
+    assert FilingReference.from_dict(filing.to_dict()) == filing
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"filed_on": "bad-date"}, "filed_on must be an ISO date"),
+        ({"report_date": 1}, "report_date must be an ISO date or null"),
+        ({"report_date": "bad"}, "report_date must be an ISO date or null"),
+        ({"accepted_at": 1}, "accepted_at must be an ISO timestamp or null"),
+        ({"accepted_at": "bad"}, "accepted_at must be an ISO timestamp or null"),
+        (
+            {"accepted_at": "2025-01-01T12:00:00"},
+            "accepted_at must include a timezone offset",
+        ),
+    ],
+)
+def test_filing_reference_parser_rejects_invalid_temporal_fields(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    """Schema drift in a workflow record is rejected at the handoff boundary."""
+    payload: dict[str, object] = {**filing_reference("0000320193-25-000001").to_dict()}
+    payload.update(overrides)
+
+    with pytest.raises(ValueError, match=message):
+        FilingReference.from_dict(payload)

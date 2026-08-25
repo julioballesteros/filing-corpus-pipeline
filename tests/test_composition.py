@@ -1,0 +1,66 @@
+"""Tests for feature-local runtime composition roots."""
+
+from types import ModuleType
+
+import pytest
+
+from filing_corpus_pipeline.acquisition import AcquisitionService
+from filing_corpus_pipeline.acquisition import composition as acquisition_composition
+from filing_corpus_pipeline.discovery import DiscoveryService
+from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
+
+
+def test_discovery_composition_builds_the_sec_service() -> None:
+    """The discovery entrypoints share one feature-local dependency graph."""
+    assert isinstance(
+        build_sec_discovery_service("pipeline contact@example.com"),
+        DiscoveryService,
+    )
+
+
+def test_acquisition_composition_builds_aws_storage_and_sec_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The acquisition graph requests exactly its two low-level AWS clients."""
+    services: list[str] = []
+
+    def aws_client(service_name: str) -> object:
+        services.append(service_name)
+        return object()
+
+    monkeypatch.setattr(acquisition_composition, "_aws_client", aws_client)
+
+    service = acquisition_composition.build_sec_acquisition_service(
+        user_agent="pipeline contact@example.com",
+        registry_table_name="filing-registry",
+        raw_bucket_name="filing-corpus-raw",
+        max_document_bytes=1024,
+    )
+
+    assert isinstance(service, AcquisitionService)
+    assert services == ["dynamodb", "s3"]
+
+
+def test_acquisition_composition_loads_the_managed_runtime_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """boto3 remains a Lambda-runtime dependency rather than a source ZIP import."""
+    requested_modules: list[str] = []
+    module = ModuleType("boto3")
+    clients: list[str] = []
+
+    def client(service_name: str) -> object:
+        clients.append(service_name)
+        return object()
+
+    module.client = client  # type: ignore[attr-defined]
+
+    def import_module(name: str) -> ModuleType:
+        requested_modules.append(name)
+        return module
+
+    monkeypatch.setattr(acquisition_composition, "import_module", import_module)
+
+    assert acquisition_composition._aws_client("s3") is not None
+    assert requested_modules == ["boto3"]
+    assert clients == ["s3"]

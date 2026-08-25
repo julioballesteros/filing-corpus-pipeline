@@ -4,34 +4,39 @@ This Terraform stack deploys the first asynchronous ingestion slice:
 
 ```text
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
-
-DynamoDB filing registry (not connected until the acquisition Lambda is added)
-S3 raw-document bucket (not connected until the acquisition Lambda is added)
+                                            |
+                                            +-> bounded acquisition Map
+                                                  |
+                                                  +-> acquisition Lambda
+                                                        |-> SEC archive
+                                                        |-> DynamoDB registry
+                                                        +-> S3 raw bucket
 ```
 
-The state machine is the execution record and retry boundary. It invokes the
-Lambda once and returns only the Lambda payload, so later map/acquisition states
-can consume the discovered filing references without knowing the Lambda service
-response envelope.
+The state machine is the execution record and retry boundary. Discovery returns
+provider-neutral filing references. A bounded inline `Map` invokes acquisition
+once for each reference and passes the workflow execution ARN as its claim
+owner. Filing bodies never enter workflow state.
 
 ## Included
 
-- a dependency-free Python 3.13 Lambda ZIP built from `src/`;
-- a Standard Step Functions state machine with transient Lambda retries;
+- separate dependency-free Python 3.13 ZIPs and explicit handlers for discovery
+  and acquisition;
+- a Standard Step Functions state machine with a failure-isolated acquisition
+  `Map` and classified retries;
 - an EventBridge schedule with a deterministic rolling-window input;
-- least-privilege execution roles for the three services;
+- least-privilege roles, including item-level DynamoDB actions and raw-prefix
+  S3 object actions for acquisition;
 - retained JSON Lambda logs, complete workflow logs, and X-Ray tracing;
-- a five-company watchlist limit and three-minute Lambda timeout to bound work
-  per execution and SEC request pressure; and
+- a five-company watchlist, Map concurrency limit, claim lease, document-size
+  cap, and Lambda timeouts to bound work and SEC request pressure;
 - an on-demand, encrypted DynamoDB filing registry with point-in-time recovery;
-  and
 - a private, encrypted and versioned S3 bucket for raw source documents.
 
-The registry and bucket are intentionally not connected to discovery. The
-acquisition Lambda will receive narrowly scoped permissions and use them from
-each Map iteration. No queue, downloader, or document processor is created yet.
-Terraform state is local for now; a remote backend should be bootstrapped before
-multiple people or automated deployment share this stack.
+No queue or document processor is created yet. DynamoDB condition expressions
+and deterministic create-only S3 writes provide the idempotency boundary at the
+current scale. Terraform state is local for now; a remote backend should be
+bootstrapped before multiple people or automated deployment share this stack.
 
 ## Deploy
 
@@ -60,7 +65,10 @@ making external requests and gives you a chance to verify a manual execution.
 Reserved Lambda concurrency is also unset by default because small or new AWS
 accounts may not have enough regional quota to reserve capacity while retaining
 the service-required unreserved pool. If the account has sufficient headroom,
-set `lambda_reserved_concurrency = 1` to impose a hard function-level cap.
+set `discovery_lambda_reserved_concurrency = 1` to impose a hard function-level
+cap.
+Acquisition Map concurrency defaults to two independently of that optional
+discovery reservation.
 
 ## Verify manually
 
@@ -74,8 +82,12 @@ aws stepfunctions start-execution \
 ```
 
 Inspect the execution in Step Functions and confirm its output contains
-`issuers_scanned` and `filings`. Lambda logs are under
-`/aws/lambda/filing-corpus-pipeline-dev-discovery`; workflow logs are under
+`issuers_scanned`, `filings_found`, and one `acquisitions` result per filing.
+Successful results should be `RAW_STORED`; replaying the same range should
+produce `ALREADY_COMPLETED`. Confirm the referenced S3 object and the DynamoDB
+registry metadata. Lambda logs are under
+`/aws/lambda/filing-corpus-pipeline-dev-discovery` and
+`/aws/lambda/filing-corpus-pipeline-dev-acquisition`; workflow logs are under
 `/aws/vendedlogs/states/filing-corpus-pipeline-dev-discovery`.
 
 Once the smoke test succeeds, set `schedule_enabled = true`, review another
@@ -95,10 +107,10 @@ seven days, and orphaned delete markers are removed. The generated bucket name
 contains the AWS account ID and a stable environment/Region hash, and is
 available through the `raw_documents_bucket_name` output.
 
-The acquisition service will use deterministic keys shaped like
-`raw/{provider}/{issuer_id}/{filing_id}/{document_name}` and store the resulting
-bucket/key, digest, and content metadata in the registry. This key
-contract is documented now but is not enforced until acquisition is added.
+The acquisition service uses deterministic keys shaped like
+`raw/{provider}/{issuer_id}/{filing_id}/{document_name}` and stores the resulting
+bucket/key/version, digest, and content metadata in the registry. Replays verify
+the existing object's digest and length rather than overwriting it.
 
 ## Reconfigure or remove
 

@@ -8,6 +8,7 @@ data "archive_file" "discovery" {
     "**/*.pyc",
     "filing_corpus_pipeline/acquisition/**",
     "filing_corpus_pipeline/adapters/sec/documents.py",
+    "filing_corpus_pipeline/entrypoints/acquisition_lambda.py",
     "filing_corpus_pipeline/registry/**",
     "filing_corpus_pipeline/storage/**",
   ]
@@ -15,25 +16,44 @@ data "archive_file" "discovery" {
   output_file_mode = "0644"
 }
 
-resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${local.lambda_function_name}"
+data "archive_file" "acquisition" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../src"
+  output_path = "${path.module}/acquisition-lambda.zip"
+
+  excludes = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "filing_corpus_pipeline/__main__.py",
+    "filing_corpus_pipeline/adapters/sec/discovery.py",
+    "filing_corpus_pipeline/adapters/sec/submissions.py",
+    "filing_corpus_pipeline/discovery/**",
+    "filing_corpus_pipeline/entrypoints/cli.py",
+    "filing_corpus_pipeline/entrypoints/discovery_lambda.py",
+  ]
+
+  output_file_mode = "0644"
+}
+
+resource "aws_cloudwatch_log_group" "discovery_lambda" {
+  name              = "/aws/lambda/${local.discovery_lambda_function_name}"
   retention_in_days = var.log_retention_days
 }
 
 resource "aws_lambda_function" "discovery" {
-  function_name = local.lambda_function_name
+  function_name = local.discovery_lambda_function_name
   description   = "Discovers new SEC 10-K and 10-Q filing references."
-  role          = aws_iam_role.lambda.arn
+  role          = aws_iam_role.discovery_lambda.arn
 
   filename         = data.archive_file.discovery.output_path
   source_code_hash = data.archive_file.discovery.output_base64sha256
-  handler          = "filing_corpus_pipeline.entrypoints.lambda_handler.handler"
+  handler          = "filing_corpus_pipeline.entrypoints.discovery_lambda.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]
 
   memory_size                    = 512
   timeout                        = 180
-  reserved_concurrent_executions = var.lambda_reserved_concurrency
+  reserved_concurrent_executions = var.discovery_lambda_reserved_concurrency
 
   environment {
     variables = {
@@ -52,7 +72,52 @@ resource "aws_lambda_function" "discovery" {
   }
 
   depends_on = [
-    aws_cloudwatch_log_group.lambda,
-    aws_iam_role_policy.lambda_runtime,
+    aws_cloudwatch_log_group.discovery_lambda,
+    aws_iam_role_policy.discovery_lambda_runtime,
+  ]
+}
+
+resource "aws_cloudwatch_log_group" "acquisition_lambda" {
+  name              = "/aws/lambda/${local.acquisition_lambda_function_name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "acquisition" {
+  function_name = local.acquisition_lambda_function_name
+  description   = "Claims and durably stores one discovered SEC filing."
+  role          = aws_iam_role.acquisition_lambda.arn
+
+  filename         = data.archive_file.acquisition.output_path
+  source_code_hash = data.archive_file.acquisition.output_base64sha256
+  handler          = "filing_corpus_pipeline.entrypoints.acquisition_lambda.handler"
+  runtime          = "python3.13"
+  architectures    = ["arm64"]
+
+  memory_size = 512
+  timeout     = 90
+
+  environment {
+    variables = {
+      ACQUISITION_LEASE_SECONDS = tostring(var.acquisition_lease_seconds)
+      MAX_DOCUMENT_BYTES        = tostring(var.acquisition_max_document_bytes)
+      RAW_BUCKET_NAME           = aws_s3_bucket.raw_documents.bucket
+      REGISTRY_TABLE_NAME       = aws_dynamodb_table.filing_registry.name
+      SEC_USER_AGENT            = var.sec_user_agent
+    }
+  }
+
+  logging_config {
+    application_log_level = "INFO"
+    log_format            = "JSON"
+    system_log_level      = "WARN"
+  }
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  depends_on = [
+    aws_cloudwatch_log_group.acquisition_lambda,
+    aws_iam_role_policy.acquisition_lambda_runtime,
   ]
 }

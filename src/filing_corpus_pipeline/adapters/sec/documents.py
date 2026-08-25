@@ -8,8 +8,8 @@ from filing_corpus_pipeline.acquisition.models import (
     RetrievedDocument,
 )
 from filing_corpus_pipeline.adapters.http import BytesHttpTransport, HttpTransportError
-from filing_corpus_pipeline.adapters.sec.discovery import SEC_ARCHIVE_BASE_URL
-from filing_corpus_pipeline.adapters.sec.submissions import normalize_cik
+from filing_corpus_pipeline.adapters.sec.constants import SEC_ARCHIVE_BASE_URL
+from filing_corpus_pipeline.adapters.sec.identifiers import normalize_cik
 from filing_corpus_pipeline.domain import FilingReference
 
 ACCESSION_PATTERN = re.compile(r"\d{10}-\d{2}-\d{6}")

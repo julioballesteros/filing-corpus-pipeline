@@ -152,21 +152,66 @@ variable "raw_bucket_force_destroy" {
   default     = false
 }
 
-variable "lambda_reserved_concurrency" {
-  description = "Optional Lambda concurrency reservation; null uses regional unreserved concurrency."
+variable "acquisition_map_max_concurrency" {
+  description = "Maximum filing acquisitions executed concurrently by Step Functions."
+  type        = number
+  default     = 2
+
+  validation {
+    condition = (
+      var.acquisition_map_max_concurrency >= 1 &&
+      var.acquisition_map_max_concurrency <= 5 &&
+      floor(var.acquisition_map_max_concurrency) == var.acquisition_map_max_concurrency
+    )
+    error_message = "acquisition_map_max_concurrency must be an integer from 1 through 5."
+  }
+}
+
+variable "acquisition_lease_seconds" {
+  description = "Registry claim lease assigned to each acquisition invocation."
+  type        = number
+  default     = 300
+
+  validation {
+    condition = (
+      var.acquisition_lease_seconds >= 120 &&
+      var.acquisition_lease_seconds <= 3600 &&
+      floor(var.acquisition_lease_seconds) == var.acquisition_lease_seconds
+    )
+    error_message = "acquisition_lease_seconds must be an integer from 120 through 3600."
+  }
+}
+
+variable "acquisition_max_document_bytes" {
+  description = "Maximum SEC primary-document response size accepted by acquisition."
+  type        = number
+  default     = 26214400
+
+  validation {
+    condition = (
+      var.acquisition_max_document_bytes >= 1048576 &&
+      var.acquisition_max_document_bytes <= 52428800 &&
+      floor(var.acquisition_max_document_bytes) == var.acquisition_max_document_bytes
+    )
+    error_message = "acquisition_max_document_bytes must be an integer from 1 MiB through 50 MiB."
+  }
+}
+
+variable "discovery_lambda_reserved_concurrency" {
+  description = "Optional discovery Lambda concurrency reservation; null uses regional unreserved concurrency."
   type        = number
   default     = null
   nullable    = true
 
   validation {
     condition = (
-      var.lambda_reserved_concurrency == null ||
+      var.discovery_lambda_reserved_concurrency == null ||
       (
-        var.lambda_reserved_concurrency >= 1 &&
-        var.lambda_reserved_concurrency <= 10 &&
-        floor(var.lambda_reserved_concurrency) == var.lambda_reserved_concurrency
+        var.discovery_lambda_reserved_concurrency >= 1 &&
+        var.discovery_lambda_reserved_concurrency <= 10 &&
+        floor(var.discovery_lambda_reserved_concurrency) == var.discovery_lambda_reserved_concurrency
       )
     )
-    error_message = "lambda_reserved_concurrency must be null or an integer from 1 through 10."
+    error_message = "discovery_lambda_reserved_concurrency must be null or an integer from 1 through 10."
   }
 }

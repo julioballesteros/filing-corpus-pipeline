@@ -93,6 +93,17 @@ class AcquisitionResult:
         ):
             raise ValueError("document metadata is required only for RAW_STORED")
 
+    def to_dict(self) -> dict[str, object]:
+        """Return a bounded payload suitable for Step Functions state."""
+        return {
+            "filing_key": self.filing_key,
+            "outcome": self.outcome.value,
+            "attempt_count": self.attempt_count,
+            "document": (
+                self.document.to_dict() if self.document is not None else None
+            ),
+        }
+
 
 class DocumentRetrievalError(RuntimeError):
     """Expected provider failure that can be persisted and classified."""

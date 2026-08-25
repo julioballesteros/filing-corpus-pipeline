@@ -1,9 +1,8 @@
 # Raw filing acquisition contract
 
 Acquisition turns one provider-neutral `FilingReference` into a durable,
-integrity-checked source object. It is intentionally a service layer first: the
-Lambda entrypoint, IAM permissions, and Step Functions `Map` state are the next
-deployment slice.
+integrity-checked source object. Terraform deploys it as a dedicated Lambda
+invoked once per filing by a bounded Step Functions `Map`.
 
 ## One invocation
 
@@ -33,11 +32,11 @@ and S3 metadata. Filing bytes never cross a Step Functions state boundary.
 
 `acquisition.FilingDocumentSource` is the small provider contract. This
 abstraction exists because additional filing providers are an explicit roadmap
-item. The first implementation, `adapters.sec.SecFilingDocumentSource`, derives
-the canonical SEC archive URL from the CIK, accession number, and primary
-document name. It rejects inconsistent workflow input before HTTP, supplies the
-required declared user agent, imposes a timeout, and caps the response at 25
-MiB by default.
+item. The first implementation,
+`adapters.sec.documents.SecFilingDocumentSource`, derives the canonical SEC
+archive URL from the CIK, accession number, and primary document name. It
+rejects inconsistent workflow input before HTTP, supplies the required declared
+user agent, imposes a timeout, and caps the response at 25 MiB by default.
 
 Adding a provider means implementing this retrieval contract beside `sec` and
 registering it during runtime composition. It does not require changing S3 or
@@ -65,8 +64,9 @@ available source ETag/Last-Modified headers.
 ## Failure and recovery behavior
 
 Expected provider and S3 failures are classified as retryable or permanent,
-written to the registry, and raised as distinct acquisition error types for a
-future workflow retry policy. Recording the failure releases the claim.
+written to the registry, and raised as distinct acquisition error types. The
+workflow retries only transient failures. Recording the failure releases the
+claim.
 
 - HTTP 429, 5xx, timeouts, network failures, S3 throttling, and S3 5xx errors
   are retryable.
@@ -81,3 +81,12 @@ future workflow retry policy. Recording the failure releases the claim.
 
 This boundary makes replay safe without introducing a queue, a second database,
 or a generic storage abstraction for the first release.
+
+## Workflow isolation
+
+The parent workflow supplies its execution ARN as `claim_owner` and the Map
+Task entry timestamp as the lease start. Map concurrency defaults to two and is
+configurable up to five, keeping SEC request pressure and Lambda cost bounded.
+After retries, an item failure becomes a small `FAILED` result containing its
+provider identity and error type; it does not prevent unrelated filings from
+being acquired. Full failure diagnostics remain in the registry and logs.

@@ -6,11 +6,11 @@ import pytest
 
 from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryResult
 from filing_corpus_pipeline.domain import FilingForm
-from filing_corpus_pipeline.entrypoints import lambda_handler
-from filing_corpus_pipeline.entrypoints.lambda_handler import (
+from filing_corpus_pipeline.entrypoints import discovery_lambda
+from filing_corpus_pipeline.entrypoints.discovery_lambda import (
     InvalidDiscoveryEvent,
-    LambdaConfigurationError,
 )
+from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 
 
 class CapturingService:
@@ -45,10 +45,10 @@ def test_handler_executes_discovery_and_returns_json_payload(
         user_agents.append(user_agent)
         return service
 
-    monkeypatch.setattr(lambda_handler, "build_sec_discovery_service", build_service)
+    monkeypatch.setattr(discovery_lambda, "build_sec_discovery_service", build_service)
     monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
 
-    result = lambda_handler.handler(valid_event(), object())
+    result = discovery_lambda.handler(valid_event(), object())
 
     assert result == {
         "filings": [],
@@ -72,7 +72,7 @@ def test_handler_requires_sec_user_agent(
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
 
     with pytest.raises(LambdaConfigurationError, match="SEC_USER_AGENT"):
-        lambda_handler.handler(valid_event(), object())
+        discovery_lambda.handler(valid_event(), object())
 
 
 def test_parser_accepts_an_explicit_form_subset() -> None:
@@ -80,7 +80,7 @@ def test_parser_accepts_an_explicit_form_subset() -> None:
     event = valid_event()
     event["forms"] = ["10-Q"]
 
-    request = lambda_handler.parse_discovery_event(event)
+    request = discovery_lambda.parse_discovery_event(event)
 
     assert request.forms == frozenset({FilingForm.TEN_Q})
 
@@ -93,7 +93,7 @@ def test_parser_derives_a_rolling_window_from_scheduled_time() -> None:
     event["scheduled_at"] = "2025-03-01T00:30:00+01:00"
     event["lookback_days"] = 7
 
-    request = lambda_handler.parse_discovery_event(event)
+    request = discovery_lambda.parse_discovery_event(event)
 
     assert request.filed_to == date(2025, 2, 28)
     assert request.filed_from == date(2025, 2, 21)
@@ -203,7 +203,7 @@ def test_parser_rejects_invalid_workflow_input(
 ) -> None:
     """Bad Step Functions input becomes a failed Lambda task."""
     with pytest.raises(InvalidDiscoveryEvent, match=message):
-        lambda_handler.parse_discovery_event(event)
+        discovery_lambda.parse_discovery_event(event)
 
 
 @pytest.mark.parametrize("lookback_days", [0, -1, 1.5, "7", True])
@@ -217,4 +217,4 @@ def test_parser_rejects_invalid_lookback_days(lookback_days: object) -> None:
     }
 
     with pytest.raises(InvalidDiscoveryEvent, match="positive integer"):
-        lambda_handler.parse_discovery_event(event)
+        discovery_lambda.parse_discovery_event(event)

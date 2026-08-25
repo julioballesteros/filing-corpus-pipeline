@@ -10,19 +10,19 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
-resource "aws_iam_role" "lambda" {
+resource "aws_iam_role" "discovery_lambda" {
   name               = "${local.name_prefix}-discovery-lambda"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
-data "aws_iam_policy_document" "lambda_runtime" {
+data "aws_iam_policy_document" "discovery_lambda_runtime" {
   statement {
     sid = "WriteFunctionLogs"
     actions = [
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
-    resources = ["${aws_cloudwatch_log_group.lambda.arn}:*"]
+    resources = ["${aws_cloudwatch_log_group.discovery_lambda.arn}:*"]
   }
 
   statement {
@@ -35,10 +35,59 @@ data "aws_iam_policy_document" "lambda_runtime" {
   }
 }
 
-resource "aws_iam_role_policy" "lambda_runtime" {
+resource "aws_iam_role_policy" "discovery_lambda_runtime" {
   name   = "runtime"
-  role   = aws_iam_role.lambda.id
-  policy = data.aws_iam_policy_document.lambda_runtime.json
+  role   = aws_iam_role.discovery_lambda.id
+  policy = data.aws_iam_policy_document.discovery_lambda_runtime.json
+}
+
+resource "aws_iam_role" "acquisition_lambda" {
+  name               = "${local.name_prefix}-acquisition-lambda"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+data "aws_iam_policy_document" "acquisition_lambda_runtime" {
+  statement {
+    sid = "WriteFunctionLogs"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.acquisition_lambda.arn}:*"]
+  }
+
+  statement {
+    sid = "UpdateFilingRegistry"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem",
+    ]
+    resources = [aws_dynamodb_table.filing_registry.arn]
+  }
+
+  statement {
+    sid = "StoreRawDocuments"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+    ]
+    resources = ["${aws_s3_bucket.raw_documents.arn}/raw/*"]
+  }
+
+  statement {
+    sid = "PublishXRayTelemetry"
+    actions = [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "acquisition_lambda_runtime" {
+  name   = "runtime"
+  role   = aws_iam_role.acquisition_lambda.id
+  policy = data.aws_iam_policy_document.acquisition_lambda_runtime.json
 }
 
 data "aws_iam_policy_document" "step_functions_assume_role" {
@@ -60,9 +109,12 @@ resource "aws_iam_role" "step_functions" {
 
 data "aws_iam_policy_document" "step_functions" {
   statement {
-    sid       = "InvokeDiscoveryFunction"
-    actions   = ["lambda:InvokeFunction"]
-    resources = [aws_lambda_function.discovery.arn]
+    sid     = "InvokeIngestionFunctions"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      aws_lambda_function.acquisition.arn,
+      aws_lambda_function.discovery.arn,
+    ]
   }
 
   statement {

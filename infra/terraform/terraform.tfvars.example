@@ -17,9 +17,15 @@ schedule_expression = "rate(6 hours)"
 # Deploy disabled, run a manual execution, then enable recurring discovery.
 schedule_enabled = false
 
+# Keep provider pressure and burst cost bounded. The defaults allow two filing
+# downloads at once, a five-minute recoverable claim, and a 25 MiB document.
+acquisition_map_max_concurrency = 2
+acquisition_lease_seconds       = 300
+acquisition_max_document_bytes  = 26214400
+
 # Leave unset in quota-constrained accounts. Enable only after confirming that
 # the regional Lambda concurrency quota has enough unreserved headroom.
-# lambda_reserved_concurrency = 1
+# discovery_lambda_reserved_concurrency = 1
 
 # Keep false while iterating locally. Enable for a long-lived environment after
 # verifying the destroy/recovery procedure.

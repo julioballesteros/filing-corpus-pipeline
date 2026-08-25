@@ -1,9 +1,9 @@
-"""Application composition shared by runtime entry points."""
+"""Runtime composition for the filing discovery feature."""
 
 from filing_corpus_pipeline.adapters.http import UrllibJsonTransport
-from filing_corpus_pipeline.adapters.sec import (
+from filing_corpus_pipeline.adapters.sec.discovery import SecFilingDiscoverySource
+from filing_corpus_pipeline.adapters.sec.submissions import (
     SecClientConfig,
-    SecFilingDiscoverySource,
     SecSubmissionsClient,
 )
 from filing_corpus_pipeline.discovery import DiscoveryService
