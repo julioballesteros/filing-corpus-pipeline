@@ -192,6 +192,8 @@ def raw_stored_request() -> MarkRawStoredRequest:
             sha256="A" * 64,
             content_length=1024,
             content_type="text/html",
+            version_id="version-1",
+            etag="etag-1",
         ),
     )
 
@@ -210,6 +212,8 @@ def test_mark_raw_stored_serializes_integrity_metadata() -> None:
     assert isinstance(values, dict)
     assert values[":raw_sha256"] == {"S": "a" * 64}
     assert values[":raw_content_length"] == {"N": "1024"}
+    assert values[":raw_version_id"] == {"S": "version-1"}
+    assert values[":raw_etag"] == {"S": "etag-1"}
     assert "REMOVE #claim_owner, #lease_expires_at_epoch" in str(
         call["UpdateExpression"]
     )

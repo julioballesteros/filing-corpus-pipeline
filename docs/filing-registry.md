@@ -18,7 +18,7 @@ The first successful claim stores:
 | Source metadata | issuer, form, filing/report dates, source URLs and primary document |
 | Claim | `status`, `claim_owner`, `lease_expires_at_epoch`, `attempt_count` |
 | Audit | `first_discovered_at`, `last_claimed_at`, `updated_at`, `schema_version` |
-| Raw object | S3 bucket/key, SHA-256, length, content type and storage timestamp |
+| Raw object | S3 bucket/key/version, ETag, SHA-256, length, content type and storage timestamp |
 | Failure | bounded error code/message, failure timestamp and `retryable` classification |
 
 Nullable filing metadata uses DynamoDB `NULL` values rather than missing fields,
@@ -78,6 +78,8 @@ The concrete `registry` service owns state-transition and conflict policy. The
 reads, and SDK error translation. There is no abstract registry service because
 there is only one implementation today.
 
-The table is deployed now but has no runtime permissions or workflow coupling.
-The next acquisition Lambda will receive exact item-level API permissions on
-this table and supply the Step Functions execution ID as `claim_owner`.
+The table is deployed now but has no acquisition runtime permissions or
+workflow coupling. The acquisition service implements these transitions
+locally. Its next Lambda composition will receive exact item-level API
+permissions on this table and supply the Step Functions execution ID as
+`claim_owner`.

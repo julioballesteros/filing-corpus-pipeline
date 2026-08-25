@@ -118,6 +118,8 @@ class DynamoDbRegistryClient:
             "#raw_sha256": "raw_sha256",
             "#raw_content_length": "raw_content_length",
             "#raw_content_type": "raw_content_type",
+            "#raw_version_id": "raw_version_id",
+            "#raw_etag": "raw_etag",
             "#raw_stored_at": "raw_stored_at",
             "#updated_at": "updated_at",
             "#last_error_code": "last_error_code",
@@ -134,6 +136,8 @@ class DynamoDbRegistryClient:
             ":raw_sha256": _string(request.document.sha256.lower()),
             ":raw_content_length": _number_value(request.document.content_length),
             ":raw_content_type": _string(request.document.content_type),
+            ":raw_version_id": _optional_string(request.document.version_id),
+            ":raw_etag": _optional_string(request.document.etag),
             ":stored_at": _string(_timestamp(request.stored_at)),
         }
         self._owned_update(
@@ -143,6 +147,7 @@ class DynamoDbRegistryClient:
                 "#raw_key = :raw_key, #raw_sha256 = :raw_sha256, "
                 "#raw_content_length = :raw_content_length, "
                 "#raw_content_type = :raw_content_type, "
+                "#raw_version_id = :raw_version_id, #raw_etag = :raw_etag, "
                 "#raw_stored_at = :stored_at, #updated_at = :stored_at "
                 "REMOVE #claim_owner, #lease_expires_at_epoch, "
                 "#last_error_code, #last_error_message, #failed_at, #retryable"

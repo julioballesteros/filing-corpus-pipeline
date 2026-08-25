@@ -6,4 +6,8 @@ from filing_corpus_pipeline.adapters.sec.submissions import (
     SecSubmissionsClient,
 )
 
-__all__ = ["SecClientConfig", "SecFilingDiscoverySource", "SecSubmissionsClient"]
+__all__ = [
+    "SecClientConfig",
+    "SecFilingDiscoverySource",
+    "SecSubmissionsClient",
+]

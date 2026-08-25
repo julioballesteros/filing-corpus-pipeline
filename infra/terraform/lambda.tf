@@ -6,6 +6,8 @@ data "archive_file" "discovery" {
   excludes = [
     "**/__pycache__/**",
     "**/*.pyc",
+    "filing_corpus_pipeline/acquisition/**",
+    "filing_corpus_pipeline/adapters/sec/documents.py",
     "filing_corpus_pipeline/registry/**",
     "filing_corpus_pipeline/storage/**",
   ]

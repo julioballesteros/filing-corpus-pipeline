@@ -43,14 +43,15 @@ contact address and do not commit it to the repository.
 
 - `domain`: provider-neutral filing records passed between pipeline stages.
 - `discovery`: the discovery request, result, provider port, and use case.
-- `adapters/sec`: SEC retrieval, response parsing, and record mapping. Future
-  document providers belong beside it.
+- `acquisition`: raw-document retrieval orchestration and its provider contract.
+- `adapters/sec`: SEC metadata/document retrieval, response parsing, and record
+  mapping. Future document providers belong beside it.
 - `registry`: filing claim models and the concrete registry service.
-- `storage`: narrow database clients and DynamoDB serialization details.
+- `storage`: narrow DynamoDB and S3 clients plus SDK serialization details.
 - `entrypoints`: thin runtime composition for the local CLI and Lambda handler.
 
-Later acquisition and processing stages should consume `FilingReference`
-records without depending on SEC response formats.
+Acquisition and later processing stages consume `FilingReference` records
+without depending on SEC response formats.
 
 ## Lambda discovery contract
 
@@ -117,8 +118,9 @@ The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
 logs, and only then enable recurring discovery. The DynamoDB registry is not
 yet invoked by the workflow, and the S3 bucket does not yet receive objects.
-Filing downloads, queues, and document processing intentionally remain outside
-this slice.
+The locally tested acquisition service is implemented, but its Lambda,
+permissions, and workflow `Map` integration remain outside this deployed slice.
+Document processing remains a later stage.
 
 ## Filing registry
 
@@ -144,8 +146,11 @@ Current source documents have no expiration because they are corpus provenance.
 
 The bucket name is stable for an account, environment, and Region without being
 globally collision-prone. Terraform refuses to destroy a populated bucket by
-default. The acquisition service will later write deterministic object keys and
-return only S3 metadata through Step Functions—never the document body.
+default. The acquisition service writes deterministic object keys and returns
+only S3 metadata—never the document body. It uses a create-only write and
+verifies an existing object's SHA-256 and length before treating a retry as
+successful. See [`docs/acquisition.md`](docs/acquisition.md) for provider
+validation, object-key, failure, and recovery contracts.
 
 To prepare a deployment:
 

@@ -7,7 +7,11 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from filing_corpus_pipeline.adapters import http
-from filing_corpus_pipeline.adapters.http import HttpTransportError, UrllibJsonTransport
+from filing_corpus_pipeline.adapters.http import (
+    HttpTransportError,
+    UrllibBytesTransport,
+    UrllibJsonTransport,
+)
 
 
 def test_transport_decodes_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,3 +95,85 @@ def test_transport_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None
         )
 
     assert raised.value.retryable is False
+
+
+def test_bytes_transport_returns_bounded_body_and_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Binary retrieval retains only the response metadata needed downstream."""
+    headers = Message()
+    headers["Content-Type"] = "text/html; charset=utf-8"
+    headers["Content-Length"] = "4"
+    headers["ETag"] = '"source-etag"'
+    headers["Last-Modified"] = "Fri, 01 Aug 2025 18:00:00 GMT"
+    response = MagicMock()
+    response.__enter__.return_value.headers = headers
+    response.__enter__.return_value.read.return_value = b"body"
+    monkeypatch.setattr(http, "urlopen", MagicMock(return_value=response))
+
+    result = UrllibBytesTransport().get_bytes(
+        "https://example.test/report.htm",
+        headers={},
+        timeout_seconds=5,
+        max_bytes=10,
+    )
+
+    assert result.body == b"body"
+    assert result.content_type == "text/html"
+    assert result.etag == '"source-etag"'
+    assert result.last_modified == "Fri, 01 Aug 2025 18:00:00 GMT"
+    response.__enter__.return_value.read.assert_called_once_with(11)
+
+
+@pytest.mark.parametrize("declared_length", ["11", "not-a-number"])
+def test_bytes_transport_enforces_declared_and_actual_size_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    declared_length: str,
+) -> None:
+    """A missing or dishonest Content-Length cannot cause an unbounded read."""
+    headers = Message()
+    headers["Content-Type"] = "text/html"
+    headers["Content-Length"] = declared_length
+    response = MagicMock()
+    response.__enter__.return_value.headers = headers
+    response.__enter__.return_value.read.return_value = b"x" * 11
+    monkeypatch.setattr(http, "urlopen", MagicMock(return_value=response))
+
+    with pytest.raises(HttpTransportError) as raised:
+        UrllibBytesTransport().get_bytes(
+            "https://example.test/report.htm",
+            headers={},
+            timeout_seconds=5,
+            max_bytes=10,
+        )
+
+    assert raised.value.code == "RESPONSE_TOO_LARGE"
+    assert raised.value.retryable is False
+
+
+def test_bytes_transport_rejects_an_invalid_limit() -> None:
+    """A programming error cannot silently disable the resource bound."""
+    with pytest.raises(ValueError, match="positive"):
+        UrllibBytesTransport().get_bytes(
+            "https://example.test/report.htm",
+            headers={},
+            timeout_seconds=5,
+            max_bytes=0,
+        )
+
+
+def test_bytes_transport_classifies_network_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Binary provider adapters receive retry information on network errors."""
+    monkeypatch.setattr(http, "urlopen", MagicMock(side_effect=TimeoutError("slow")))
+
+    with pytest.raises(HttpTransportError) as raised:
+        UrllibBytesTransport().get_bytes(
+            "https://example.test/report.htm",
+            headers={},
+            timeout_seconds=5,
+            max_bytes=10,
+        )
+
+    assert raised.value.retryable is True

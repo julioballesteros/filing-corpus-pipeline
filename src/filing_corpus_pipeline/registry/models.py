@@ -105,6 +105,8 @@ class RawDocumentMetadata:
     sha256: str
     content_length: int
     content_type: str
+    version_id: str | None = None
+    etag: str | None = None
 
     def __post_init__(self) -> None:
         for field in ("bucket", "key", "content_type"):
@@ -115,6 +117,10 @@ class RawDocumentMetadata:
             raise ValueError("sha256 must be a 64-character hexadecimal digest")
         if self.content_length < 0:
             raise ValueError("content_length must not be negative")
+        for field in ("version_id", "etag"):
+            value = getattr(self, field)
+            if value is not None:
+                _require_nonempty(value, field=field)
 
 
 @dataclass(frozen=True, slots=True)

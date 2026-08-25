@@ -131,6 +131,8 @@ def test_claim_result_reports_ownership() -> None:
         {"bucket": ""},
         {"key": ""},
         {"content_type": ""},
+        {"version_id": ""},
+        {"etag": ""},
     ],
 )
 def test_raw_document_metadata_validates_integrity_fields(
