@@ -61,7 +61,7 @@ def test_artifacts_are_reproducible_and_self_verifying() -> None:
     assert first.manifest_sha256 == sha256(first.manifest).hexdigest()
     assert first.blocks_sha256 == sha256(first.blocks_jsonl_gzip).hexdigest()
     assert manifest["schema_version"] == "1"
-    assert manifest["parser_version"] == "sec-html-v1"
+    assert manifest["parser_version"] == "sec-html-v2"
     assert manifest["quality"] == {"status": "PASS", "warnings": []}
     assert manifest["statistics"]["block_count"] == len(records)
     assert manifest["statistics"]["table_count"] == 1
@@ -81,7 +81,7 @@ def test_normalized_prefix_escapes_identity_segments() -> None:
 
     assert normalized_document_prefix(document) == (
         "normalized/provider%2Fone/issuer%2F1/filing%20%231/"
-        "sec-html-v1/" + document.source_sha256
+        "sec-html-v2/" + document.source_sha256
     )
 
 

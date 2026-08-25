@@ -51,9 +51,14 @@ access and unbounded-tree support disabled. It:
 6. gives every block a stable ordinal, content digest, and ID; and
 7. creates compact section index records for downstream consumers.
 
-Section detection ignores fragment-only table-of-contents links and bounds
-heading length. Repeated Item headings receive distinct stable section IDs and
-a data-quality warning instead of overwriting content.
+Section detection ignores fragment links, bounds heading length, and requires
+structural evidence such as a native heading, emphasized text, uppercase text,
+or an exact form/Part-specific Item title. One-row emphasized layout tables are
+converted to headings; ordinary tables retain their row/cell structure. This
+handles common SEC presentation markup without treating narrative paragraphs
+that merely begin with an Item cross-reference as new sections. Repeated true
+Item headings receive distinct stable section IDs and a data-quality warning
+instead of overwriting content.
 
 This is corpus normalization, not semantic accounting extraction. Tables retain
 their row/cell structure and visible inline-XBRL values, but XBRL concepts,
@@ -64,7 +69,7 @@ document corpus for narrative and RAG-oriented consumers.
 
 ## Output contract
 
-The schema version is `1`; the parser version is `sec-html-v1`. They change for
+The schema version is `1`; the parser version is `sec-html-v2`. They change for
 different reasons:
 
 - increment the schema version when a downstream-facing field or meaning

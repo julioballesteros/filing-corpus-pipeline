@@ -7,6 +7,7 @@ import pytest
 
 from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
 from filing_corpus_pipeline.normalization import (
+    SEC_HTML_PARSER_VERSION,
     BlockType,
     DocumentBlock,
     DocumentParseError,
@@ -71,7 +72,7 @@ def _document(**overrides: object) -> NormalizedDocument:
     values: dict[str, object] = {
         "filing_key": "sec#0000000000-25-000001",
         "filing": _filing(),
-        "parser_version": "sec-html-v1",
+        "parser_version": SEC_HTML_PARSER_VERSION,
         "schema_version": "1",
         "source_sha256": "b" * 64,
         "source_content_length": 100,

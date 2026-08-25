@@ -225,7 +225,7 @@ def test_duplicate_items_are_separate_stable_sections() -> None:
 
 def test_fragment_link_item_is_not_treated_as_a_section_heading() -> None:
     body = b"""
-        <div><a href="#item1">ITEM 1. FINANCIAL STATEMENTS</a></div>
+        <div><a href="report.htm#item1">ITEM 1. FINANCIAL STATEMENTS</a></div>
         <h2>PART I</h2><h3 id="item1">ITEM 1. FINANCIAL STATEMENTS</h3>
         <p>Statements.</p>
         <h3>ITEM 2. MANAGEMENT'S DISCUSSION AND ANALYSIS</h3><p>Discussion.</p>
@@ -237,6 +237,70 @@ def test_fragment_link_item_is_not_treated_as_a_section_heading() -> None:
     )
     assert document.blocks[0].section_id == "preamble"
     assert document.blocks[0].block_type is BlockType.PARAGRAPH
+
+
+def test_handles_layout_headings_without_promoting_cross_references() -> None:
+    body = (_FIXTURES / "layout-heading-regressions.html").read_bytes()
+    document = _normalizer().normalize(_source(body))
+    headings = [
+        block for block in document.blocks if block.block_type is BlockType.HEADING
+    ]
+    references = [block for block in document.blocks if "CROSS_REFERENCE" in block.text]
+    data_table = next(
+        block
+        for block in document.blocks
+        if block.block_type is BlockType.TABLE
+        and "Not a structural heading" in block.text
+    )
+
+    assert [
+        (block.part, block.item, block.canonical_section) for block in headings
+    ] == [
+        ("I", None, "part"),
+        ("I", "1", "financial_statements"),
+        ("I", "2", "management_discussion_and_analysis"),
+        ("II", None, "part"),
+        ("II", "1A", "risk_factors"),
+    ]
+    assert all(block.table_rows is None for block in headings)
+    assert all(" | " not in block.text for block in headings)
+    assert [block.block_type for block in references] == [
+        BlockType.PARAGRAPH,
+        BlockType.PARAGRAPH,
+    ]
+    assert references[0].section_id == "part-i-item-1"
+    assert references[1].section_id == "part-i-item-2"
+    assert data_table.table_rows == (
+        ("Item 1.", "Financial Statements"),
+        ("Reference", "Not a structural heading"),
+    )
+    assert not any(
+        warning.code == "DUPLICATE_ITEM_HEADING" for warning in document.warnings
+    )
+
+
+def test_maps_10k_part_one_operational_sections() -> None:
+    body = b"""
+        <h2>PART I</h2>
+        <p>Item 1. Business</p><p>Business content.</p>
+        <p>Item 1A. Risk Factors</p><p>Risks.</p>
+        <p>Item 2. Properties</p><p>Properties content.</p>
+        <p>Item 3. Legal Proceedings</p><p>Legal content.</p>
+        <p>Item 4. Mine Safety Disclosures</p><p>Safety content.</p>
+        <h2>PART II</h2>
+        <p>Item 7. Management's Discussion and Analysis</p><p>Discussion.</p>
+        <p>Item 8. Financial Statements and Supplementary Data</p><p>Statements.</p>
+    """
+    document = _normalizer().normalize(_source(body, form=FilingForm.TEN_K))
+    item_sections = {
+        (block.part, block.item): block.canonical_section
+        for block in document.blocks
+        if block.item is not None
+    }
+
+    assert item_sections[("I", "2")] == "properties"
+    assert item_sections[("I", "3")] == "legal_proceedings"
+    assert item_sections[("I", "4")] == "mine_safety_disclosures"
 
 
 def test_long_item_like_paragraph_is_not_treated_as_a_section_heading() -> None:

@@ -6,7 +6,7 @@ from enum import StrEnum
 from filing_corpus_pipeline.domain import FilingReference
 
 NORMALIZATION_SCHEMA_VERSION = "1"
-SEC_HTML_PARSER_VERSION = "sec-html-v1"
+SEC_HTML_PARSER_VERSION = "sec-html-v2"
 
 
 def _require_text(value: str, *, field: str) -> None:

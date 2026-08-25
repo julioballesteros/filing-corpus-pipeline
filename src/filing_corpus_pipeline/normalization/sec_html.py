@@ -65,6 +65,9 @@ _TEN_K_SECTIONS = {
     ("I", "1A"): "risk_factors",
     ("I", "1B"): "unresolved_staff_comments",
     ("I", "1C"): "cybersecurity",
+    ("I", "2"): "properties",
+    ("I", "3"): "legal_proceedings",
+    ("I", "4"): "mine_safety_disclosures",
     ("II", "5"): "market_for_registrants_equity",
     ("II", "6"): "reserved",
     ("II", "7"): "management_discussion_and_analysis",
@@ -81,6 +84,82 @@ _TEN_K_SECTIONS = {
     ("III", "14"): "principal_accountant_fees",
     ("IV", "15"): "exhibits_and_schedules",
     ("IV", "16"): "form_10k_summary",
+}
+_ITEM_TITLES = {
+    FilingForm.TEN_K: {
+        ("I", "1"): ("business",),
+        ("I", "1A"): ("risk factors",),
+        ("I", "1B"): ("unresolved staff comments",),
+        ("I", "1C"): ("cybersecurity",),
+        ("I", "2"): ("properties",),
+        ("I", "3"): ("legal proceedings",),
+        ("I", "4"): ("mine safety disclosures",),
+        ("II", "5"): (
+            "market for registrants common equity related stockholder matters "
+            "and issuer purchases of equity securities",
+        ),
+        ("II", "6"): ("reserved",),
+        ("II", "7"): (
+            "managements discussion and analysis",
+            "managements discussion and analysis of financial condition and "
+            "results of operations",
+        ),
+        ("II", "7A"): ("quantitative and qualitative disclosures about market risk",),
+        ("II", "8"): (
+            "financial statements and supplementary data",
+            "financial statements and supplemental data",
+        ),
+        ("II", "9"): (
+            "changes in and disagreements with accountants on accounting and "
+            "financial disclosure",
+        ),
+        ("II", "9A"): ("controls and procedures",),
+        ("II", "9B"): ("other information",),
+        ("II", "9C"): (
+            "disclosure regarding foreign jurisdictions that prevent inspections",
+            "disclosures regarding foreign jurisdictions that prevent inspections",
+        ),
+        ("III", "10"): (
+            "directors executive officers and corporate governance",
+            "directors and corporate governance",
+        ),
+        ("III", "11"): ("executive compensation",),
+        ("III", "12"): (
+            "security ownership of certain beneficial owners and management and "
+            "related stockholder matters",
+        ),
+        ("III", "13"): (
+            "certain relationships and related transactions and director independence",
+            "related transactions and director independence",
+        ),
+        ("III", "14"): ("principal accountant fees and services",),
+        ("IV", "15"): (
+            "exhibits and financial statement schedules",
+            "exhibits financial statement schedules",
+            "exhibits and schedules",
+        ),
+        ("IV", "16"): ("form 10 k summary",),
+    },
+    FilingForm.TEN_Q: {
+        ("I", "1"): ("financial statements",),
+        ("I", "2"): (
+            "managements discussion and analysis",
+            "managements discussion and analysis of financial condition and "
+            "results of operations",
+        ),
+        ("I", "3"): ("quantitative and qualitative disclosures about market risk",),
+        ("I", "4"): ("controls and procedures",),
+        ("II", "1"): ("legal proceedings",),
+        ("II", "1A"): ("risk factors",),
+        ("II", "2"): (
+            "unregistered sales of equity securities and use of proceeds",
+            "unregistered sales of equity securities",
+        ),
+        ("II", "3"): ("defaults upon senior securities",),
+        ("II", "4"): ("mine safety disclosures",),
+        ("II", "5"): ("other information",),
+        ("II", "6"): ("exhibits",),
+    },
 }
 _TEN_Q_SECTIONS = {
     ("I", "1"): "financial_statements",
@@ -115,6 +194,7 @@ class _ExtractedBlock:
     text: str
     table_rows: tuple[tuple[str, ...], ...] | None
     is_toc_link: bool
+    is_emphasized: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +312,7 @@ class SecHtmlNormalizer:
                 continue
 
             table_rows: tuple[tuple[str, ...], ...] | None = None
+            is_emphasized = _is_fully_emphasized(element)
             if tag == "table":
                 remaining_cells = self._config.max_table_cells - table_cells
                 table_rows, cell_count = _table_rows(
@@ -243,6 +324,14 @@ class SecHtmlNormalizer:
                     continue
                 text = "\n".join(" | ".join(row) for row in table_rows)
                 block_type = BlockType.TABLE
+                layout_heading = _layout_table_heading(
+                    table_rows,
+                    is_emphasized=is_emphasized,
+                )
+                if layout_heading is not None:
+                    text = layout_heading
+                    block_type = BlockType.HEADING
+                    table_rows = None
             else:
                 text = _normalized_text(" ".join(element.itertext()))
                 if not text:
@@ -255,6 +344,7 @@ class SecHtmlNormalizer:
                     text=text,
                     table_rows=table_rows,
                     is_toc_link=_is_toc_link(element, text),
+                    is_emphasized=is_emphasized,
                 )
             )
             if len(blocks) > self._config.max_blocks:
@@ -270,7 +360,15 @@ class SecHtmlNormalizer:
             )
             text = _normalized_text(" ".join(body.itertext()))
             if text:
-                blocks.append(_ExtractedBlock(BlockType.PARAGRAPH, text, None, False))
+                blocks.append(
+                    _ExtractedBlock(
+                        BlockType.PARAGRAPH,
+                        text,
+                        None,
+                        False,
+                        False,
+                    )
+                )
         return blocks
 
     @staticmethod
@@ -293,9 +391,8 @@ class SecHtmlNormalizer:
         item_occurrences: Counter[tuple[str | None, str]] = Counter()
 
         for ordinal, value in enumerate(extracted):
-            is_section_heading = not value.is_toc_link and len(value.text) <= 300
-            part_match = _PART_PATTERN.match(value.text) if is_section_heading else None
-            item_match = _ITEM_PATTERN.match(value.text) if is_section_heading else None
+            part_match = _part_heading_match(value)
+            item_match = _item_heading_match(value, form, current_part)
             block_type = value.block_type
 
             if part_match is not None:
@@ -453,6 +550,123 @@ def _block_type(tag: str) -> BlockType:
     return BlockType.PARAGRAPH
 
 
+def _part_heading_match(value: _ExtractedBlock) -> re.Match[str] | None:
+    if (
+        value.is_toc_link
+        or len(value.text) > 100
+        or value.block_type in {BlockType.LIST_ITEM, BlockType.TABLE}
+    ):
+        return None
+    match = _PART_PATTERN.match(value.text)
+    if match is None:
+        return None
+    remainder = value.text[match.end() :].strip(" .:-\N{EN DASH}\N{EM DASH}")
+    has_heading_evidence = (
+        value.block_type is BlockType.HEADING
+        or value.is_emphasized
+        or value.text.isupper()
+        or not remainder
+    )
+    return match if has_heading_evidence else None
+
+
+def _item_heading_match(
+    value: _ExtractedBlock,
+    form: FilingForm,
+    part: str | None,
+) -> re.Match[str] | None:
+    if (
+        value.is_toc_link
+        or len(value.text) > 300
+        or value.block_type
+        in {BlockType.LIST_ITEM, BlockType.TABLE, BlockType.PREFORMATTED}
+    ):
+        return None
+    match = _ITEM_PATTERN.match(value.text)
+    if match is None:
+        return None
+    item = match.group(1).upper()
+    has_heading_evidence = (
+        value.block_type is BlockType.HEADING
+        or value.is_emphasized
+        or value.text.isupper()
+        or _matches_item_title(form, part, item, match.group(2))
+    )
+    return match if has_heading_evidence else None
+
+
+def _matches_item_title(
+    form: FilingForm,
+    part: str | None,
+    item: str,
+    title: str,
+) -> bool:
+    if part is None:
+        return False
+    normalized = _title_key(title)
+    return normalized in _ITEM_TITLES[form].get((part, item), ())
+
+
+def _title_key(value: str) -> str:
+    normalized = (
+        unicodedata.normalize("NFKC", value)
+        .casefold()
+        .replace("\N{RIGHT SINGLE QUOTATION MARK}", "'")
+        .replace("'", "")
+    )
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized).split())
+
+
+def _layout_table_heading(
+    rows: tuple[tuple[str, ...], ...],
+    *,
+    is_emphasized: bool,
+) -> str | None:
+    if len(rows) != 1 or not is_emphasized:
+        return None
+    nonempty_cells = [cell for cell in rows[0] if cell]
+    if not 1 <= len(nonempty_cells) <= 2:
+        return None
+    text = _normalized_text(" ".join(nonempty_cells))
+    if len(text) > 300:
+        return None
+    if _PART_PATTERN.match(text) is None and _ITEM_PATTERN.match(text) is None:
+        return None
+    return text
+
+
+def _is_fully_emphasized(element: HtmlElement) -> bool:
+    emphasized_characters = 0
+    total_characters = 0
+
+    def visit(node: HtmlElement, inherited: bool) -> None:
+        nonlocal emphasized_characters, total_characters
+        current = inherited or _element_is_emphasized(node)
+        if node.text:
+            length = len(_normalized_text(node.text))
+            total_characters += length
+            emphasized_characters += length if current else 0
+        for child in node.iterchildren():
+            visit(child, current)
+            if child.tail:
+                length = len(_normalized_text(child.tail))
+                total_characters += length
+                emphasized_characters += length if current else 0
+
+    inherited = any(
+        _element_is_emphasized(ancestor) for ancestor in element.iterancestors()
+    )
+    visit(element, inherited)
+    return total_characters > 0 and emphasized_characters / total_characters >= 0.8
+
+
+def _element_is_emphasized(element: HtmlElement) -> bool:
+    if _local_name(element) in {"b", "strong"}:
+        return True
+    style = "".join(element.get("style", "").casefold().split())
+    return re.search(r"font-weight:(?:bold|[6-9]00)(?:;|$)", style) is not None
+
+
 def _table_rows(
     element: HtmlElement, *, max_cells: int
 ) -> tuple[tuple[tuple[str, ...], ...], int]:
@@ -495,7 +709,7 @@ def _is_toc_link(element: HtmlElement, text: str) -> bool:
         if _local_name(descendant) != "a":
             continue
         href = descendant.get("href", "").strip()
-        if href.startswith("#"):
+        if "#" in href and href.rsplit("#", 1)[-1]:
             has_fragment_link = True
             linked_text += _normalized_text(" ".join(descendant.itertext()))
     return has_fragment_link and len(linked_text) >= max(1, int(len(text) * 0.8))
