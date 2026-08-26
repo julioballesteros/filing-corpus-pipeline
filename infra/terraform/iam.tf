@@ -115,8 +115,11 @@ data "aws_iam_policy_document" "normalization_lambda_runtime" {
   }
 
   statement {
-    sid       = "ReadRawDocuments"
-    actions   = ["s3:GetObject"]
+    sid = "ReadRawDocuments"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+    ]
     resources = ["${aws_s3_bucket.raw_documents.arn}/raw/*"]
   }
 
