@@ -5,14 +5,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NoReturn, Protocol
+from typing import NoReturn, Protocol
 
-if TYPE_CHECKING:
-    from filing_corpus_pipeline.registry.models import (
-        ClaimRequest,
-        MarkFailedRequest,
-        MarkRawStoredRequest,
-    )
+from filing_corpus_pipeline.registry.models import (
+    ClaimRequest,
+    MarkFailedRequest,
+    MarkNormalizationFailedRequest,
+    MarkNormalizedRequest,
+    MarkRawStoredRequest,
+    NormalizationClaimRequest,
+    NormalizedCorpusMetadata,
+    RawDocumentMetadata,
+)
 
 SCHEMA_VERSION = 1
 
@@ -50,6 +54,19 @@ class StoredRegistryItem:
     attempt_count: int
     owner_id: str | None
     retryable: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredNormalizationItem:
+    """Registry fields required to coordinate normalization."""
+
+    status: str
+    attempt_count: int
+    raw_document: RawDocumentMetadata
+    parser_version: str | None
+    owner_id: str | None
+    retryable: bool | None
+    corpus: NormalizedCorpusMetadata | None
 
 
 class DynamoDbRegistryClient:
@@ -190,6 +207,207 @@ class DynamoDbRegistryClient:
             values=values,
         )
 
+    def claim_normalization(
+        self,
+        request: NormalizationClaimRequest,
+    ) -> StoredNormalizationItem:
+        """Atomically acquire normalization and return the previous raw state."""
+        names = _normalization_attribute_names(
+            "status",
+            "updated_at",
+            "normalization_attempt_count",
+            "normalization_owner",
+            "normalization_lease_expires_at_epoch",
+            "normalization_parser_version",
+            "normalization_last_claimed_at",
+            "normalization_error_code",
+            "normalization_error_message",
+            "normalization_failed_at",
+            "normalization_retryable",
+        )
+        values = {
+            ":raw_stored": _string("RAW_STORED"),
+            ":normalizing": _string("NORMALIZING"),
+            ":normalized": _string("NORMALIZED"),
+            ":normalization_failed": _string("NORMALIZATION_FAILED"),
+            ":true": {"BOOL": True},
+            ":owner": _string(request.owner_id),
+            ":parser_version": _string(request.parser_version),
+            ":lease_expires_at_epoch": _number_value(
+                int(request.lease_expires_at.timestamp())
+            ),
+            ":now_epoch": _number_value(int(request.claimed_at.timestamp())),
+            ":now": _string(_timestamp(request.claimed_at)),
+            ":zero": _number_value(0),
+            ":one": _number_value(1),
+        }
+        try:
+            response = self._api.update_item(
+                TableName=self._table_name,
+                Key={"filing_key": _string(request.filing_key)},
+                UpdateExpression=(
+                    "SET #status = :normalizing, #normalization_owner = :owner, "
+                    "#normalization_lease_expires_at_epoch = :lease_expires_at_epoch, "
+                    "#normalization_parser_version = :parser_version, "
+                    "#normalization_last_claimed_at = :now, #updated_at = :now, "
+                    "#normalization_attempt_count = "
+                    "if_not_exists(#normalization_attempt_count, :zero) + :one "
+                    "REMOVE #normalization_error_code, #normalization_error_message, "
+                    "#normalization_failed_at, #normalization_retryable"
+                ),
+                ConditionExpression=(
+                    "#status = :raw_stored OR "
+                    "(#status = :normalization_failed AND "
+                    "(#normalization_retryable = :true OR "
+                    "attribute_not_exists(#normalization_parser_version) OR "
+                    "#normalization_parser_version <> :parser_version)) OR "
+                    "(#status = :normalizing AND "
+                    "(#normalization_owner = :owner OR "
+                    "attribute_not_exists(#normalization_lease_expires_at_epoch) OR "
+                    "#normalization_lease_expires_at_epoch <= :now_epoch)) OR "
+                    "(#status = :normalized AND "
+                    "(attribute_not_exists(#normalization_parser_version) OR "
+                    "#normalization_parser_version <> :parser_version))"
+                ),
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+                ReturnValues="ALL_OLD",
+            )
+        except Exception as error:
+            _raise_storage_error(error, operation="normalization claim")
+
+        previous = _parse_normalization_item(response.get("Attributes"))
+        if previous is None:
+            raise InvalidDynamoDbItemError(
+                "normalization claim succeeded without a prior raw registry item"
+            )
+        return previous
+
+    def get_normalization(self, filing_key: str) -> StoredNormalizationItem | None:
+        """Read the current state needed to classify a normalization conflict."""
+        fields = (
+            "status",
+            "normalization_attempt_count",
+            "normalization_owner",
+            "normalization_retryable",
+            "normalization_parser_version",
+            *_raw_fields(),
+            *_corpus_fields(),
+        )
+        names = _normalization_attribute_names(*fields)
+        projection = ", ".join(f"#{field}" for field in fields)
+        try:
+            response = self._api.get_item(
+                TableName=self._table_name,
+                Key={"filing_key": _string(filing_key)},
+                ConsistentRead=True,
+                ProjectionExpression=projection,
+                ExpressionAttributeNames=names,
+            )
+        except Exception as error:
+            _raise_storage_error(error, operation="normalization item read")
+        return _parse_normalization_item(response.get("Item"))
+
+    def mark_normalized(self, request: MarkNormalizedRequest) -> None:
+        """Publish normalized corpus metadata and release its claim."""
+        corpus = request.corpus
+        names = _normalization_attribute_names(
+            "status",
+            "updated_at",
+            "normalization_owner",
+            "normalization_lease_expires_at_epoch",
+            "normalization_parser_version",
+            "normalization_error_code",
+            "normalization_error_message",
+            "normalization_failed_at",
+            "normalization_retryable",
+            "normalized_at",
+            *_corpus_fields(),
+        )
+        values: dict[str, AttributeValue] = {
+            ":normalizing": _string("NORMALIZING"),
+            ":normalized": _string("NORMALIZED"),
+            ":owner": _string(request.owner_id),
+            ":normalized_at": _string(_timestamp(request.normalized_at)),
+            ":normalized_bucket": _string(corpus.bucket),
+            ":normalized_prefix": _string(corpus.prefix),
+            ":normalized_manifest_key": _string(corpus.manifest_key),
+            ":normalized_manifest_sha256": _string(corpus.manifest_sha256.lower()),
+            ":normalized_blocks_key": _string(corpus.blocks_key),
+            ":normalized_blocks_sha256": _string(corpus.blocks_sha256.lower()),
+            ":normalization_parser_version": _string(corpus.parser_version),
+            ":normalization_schema_version": _string(corpus.schema_version),
+            ":normalized_block_count": _number_value(corpus.block_count),
+            ":normalized_section_count": _number_value(corpus.section_count),
+            ":normalized_warning_count": _number_value(corpus.warning_count),
+            ":normalized_quality_status": _string(corpus.quality_status),
+        }
+        self._owned_normalization_update(
+            filing_key=request.filing_key,
+            update_expression=(
+                "SET #status = :normalized, #normalized_bucket = :normalized_bucket, "
+                "#normalized_prefix = :normalized_prefix, "
+                "#normalized_manifest_key = :normalized_manifest_key, "
+                "#normalized_manifest_sha256 = :normalized_manifest_sha256, "
+                "#normalized_blocks_key = :normalized_blocks_key, "
+                "#normalized_blocks_sha256 = :normalized_blocks_sha256, "
+                "#normalization_parser_version = :normalization_parser_version, "
+                "#normalization_schema_version = :normalization_schema_version, "
+                "#normalized_block_count = :normalized_block_count, "
+                "#normalized_section_count = :normalized_section_count, "
+                "#normalized_warning_count = :normalized_warning_count, "
+                "#normalized_quality_status = :normalized_quality_status, "
+                "#normalized_at = :normalized_at, #updated_at = :normalized_at "
+                "REMOVE #normalization_owner, "
+                "#normalization_lease_expires_at_epoch, #normalization_error_code, "
+                "#normalization_error_message, #normalization_failed_at, "
+                "#normalization_retryable"
+            ),
+            names=names,
+            values=values,
+        )
+
+    def mark_normalization_failed(
+        self,
+        request: MarkNormalizationFailedRequest,
+    ) -> None:
+        """Persist normalization failure details and release its claim."""
+        names = _normalization_attribute_names(
+            "status",
+            "updated_at",
+            "normalization_owner",
+            "normalization_lease_expires_at_epoch",
+            "normalization_parser_version",
+            "normalization_error_code",
+            "normalization_error_message",
+            "normalization_failed_at",
+            "normalization_retryable",
+        )
+        values: dict[str, AttributeValue] = {
+            ":normalizing": _string("NORMALIZING"),
+            ":normalization_failed": _string("NORMALIZATION_FAILED"),
+            ":owner": _string(request.owner_id),
+            ":parser_version": _string(request.parser_version),
+            ":error_code": _string(request.failure.code),
+            ":error_message": _string(request.failure.message),
+            ":failed_at": _string(_timestamp(request.failed_at)),
+            ":retryable": {"BOOL": request.failure.retryable},
+        }
+        self._owned_normalization_update(
+            filing_key=request.filing_key,
+            update_expression=(
+                "SET #status = :normalization_failed, "
+                "#normalization_parser_version = :parser_version, "
+                "#normalization_error_code = :error_code, "
+                "#normalization_error_message = :error_message, "
+                "#normalization_failed_at = :failed_at, "
+                "#normalization_retryable = :retryable, #updated_at = :failed_at "
+                "REMOVE #normalization_owner, #normalization_lease_expires_at_epoch"
+            ),
+            names=names,
+            values=values,
+        )
+
     def _owned_update(
         self,
         *,
@@ -210,6 +428,29 @@ class DynamoDbRegistryClient:
             )
         except Exception as error:
             _raise_storage_error(error, operation="registry state update")
+
+    def _owned_normalization_update(
+        self,
+        *,
+        filing_key: str,
+        update_expression: str,
+        names: dict[str, str],
+        values: dict[str, AttributeValue],
+    ) -> None:
+        try:
+            self._api.update_item(
+                TableName=self._table_name,
+                Key={"filing_key": _string(filing_key)},
+                UpdateExpression=update_expression,
+                ConditionExpression=(
+                    "#status = :normalizing AND #normalization_owner = :owner"
+                ),
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+                ReturnValues="NONE",
+            )
+        except Exception as error:
+            _raise_storage_error(error, operation="normalization state update")
 
 
 def _raise_storage_error(error: Exception, *, operation: str) -> NoReturn:
@@ -315,6 +556,38 @@ def _claim_attribute_values(request: ClaimRequest) -> dict[str, AttributeValue]:
     }
 
 
+def _raw_fields() -> tuple[str, ...]:
+    return (
+        "raw_bucket",
+        "raw_key",
+        "raw_sha256",
+        "raw_content_length",
+        "raw_content_type",
+        "raw_version_id",
+        "raw_etag",
+    )
+
+
+def _corpus_fields() -> tuple[str, ...]:
+    return (
+        "normalized_bucket",
+        "normalized_prefix",
+        "normalized_manifest_key",
+        "normalized_manifest_sha256",
+        "normalized_blocks_key",
+        "normalized_blocks_sha256",
+        "normalization_schema_version",
+        "normalized_block_count",
+        "normalized_section_count",
+        "normalized_warning_count",
+        "normalized_quality_status",
+    )
+
+
+def _normalization_attribute_names(*fields: str) -> dict[str, str]:
+    return {f"#{field}": field for field in fields}
+
+
 def _timestamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
@@ -347,6 +620,83 @@ def _parse_optional_item(value: object, *, field: str) -> StoredRegistryItem | N
     )
 
 
+def _parse_normalization_item(value: object) -> StoredNormalizationItem | None:
+    if value is None or value == {}:
+        return None
+    item = _validated_item(value, field="normalization registry item")
+    try:
+        raw_document = RawDocumentMetadata(
+            bucket=_text(item, "raw_bucket"),
+            key=_text(item, "raw_key"),
+            sha256=_text(item, "raw_sha256"),
+            content_length=_number(item, "raw_content_length"),
+            content_type=_text(item, "raw_content_type"),
+            version_id=_nullable_text(item, "raw_version_id"),
+            etag=_nullable_text(item, "raw_etag"),
+        )
+    except ValueError as error:
+        raise InvalidDynamoDbItemError(
+            f"invalid raw document metadata: {error}"
+        ) from error
+    status = _text(item, "status")
+    parser_version = _optional_text(item, "normalization_parser_version")
+    corpus = (
+        _parse_optional_corpus(item, parser_version=parser_version)
+        if status == "NORMALIZED"
+        else None
+    )
+    return StoredNormalizationItem(
+        status=status,
+        attempt_count=_optional_number(item, "normalization_attempt_count") or 0,
+        raw_document=raw_document,
+        parser_version=parser_version,
+        owner_id=_optional_text(item, "normalization_owner"),
+        retryable=_optional_boolean(item, "normalization_retryable"),
+        corpus=corpus,
+    )
+
+
+def _parse_optional_corpus(
+    item: DynamoItem,
+    *,
+    parser_version: str | None,
+) -> NormalizedCorpusMetadata | None:
+    if "normalized_bucket" not in item:
+        return None
+    if parser_version is None:
+        raise InvalidDynamoDbItemError(
+            "normalized corpus is missing 'normalization_parser_version'"
+        )
+    try:
+        return NormalizedCorpusMetadata(
+            bucket=_text(item, "normalized_bucket"),
+            prefix=_text(item, "normalized_prefix"),
+            manifest_key=_text(item, "normalized_manifest_key"),
+            manifest_sha256=_text(item, "normalized_manifest_sha256"),
+            blocks_key=_text(item, "normalized_blocks_key"),
+            blocks_sha256=_text(item, "normalized_blocks_sha256"),
+            parser_version=parser_version,
+            schema_version=_text(item, "normalization_schema_version"),
+            block_count=_number(item, "normalized_block_count"),
+            section_count=_number(item, "normalized_section_count"),
+            warning_count=_number(item, "normalized_warning_count"),
+            quality_status=_text(item, "normalized_quality_status"),
+        )
+    except ValueError as error:
+        raise InvalidDynamoDbItemError(
+            f"invalid normalized corpus metadata: {error}"
+        ) from error
+
+
+def _validated_item(value: object, *, field: str) -> DynamoItem:
+    if not isinstance(value, Mapping) or not all(
+        isinstance(key, str) and isinstance(attribute, Mapping)
+        for key, attribute in value.items()
+    ):
+        raise InvalidDynamoDbItemError(f"{field} must be a DynamoDB item")
+    return value
+
+
 def _text(item: DynamoItem, field: str) -> str:
     attribute = item.get(field)
     if not isinstance(attribute, Mapping):
@@ -359,6 +709,15 @@ def _text(item: DynamoItem, field: str) -> str:
 
 def _optional_text(item: DynamoItem, field: str) -> str | None:
     if field not in item:
+        return None
+    return _text(item, field)
+
+
+def _nullable_text(item: DynamoItem, field: str) -> str | None:
+    if field not in item:
+        return None
+    attribute = item[field]
+    if isinstance(attribute, Mapping) and attribute.get("NULL") is True:
         return None
     return _text(item, field)
 
@@ -376,6 +735,12 @@ def _number(item: DynamoItem, field: str) -> int:
         raise InvalidDynamoDbItemError(
             f"DynamoDB attribute {field!r} must be an integer"
         ) from error
+
+
+def _optional_number(item: DynamoItem, field: str) -> int | None:
+    if field not in item:
+        return None
+    return _number(item, field)
 
 
 def _optional_boolean(item: DynamoItem, field: str) -> bool | None:

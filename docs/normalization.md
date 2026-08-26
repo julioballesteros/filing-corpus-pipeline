@@ -1,9 +1,9 @@
-# Local SEC HTML normalization
+# SEC HTML normalization
 
 ## Scope
 
-This round implements the deterministic transformation between an acquired raw
-SEC primary document and storage-ready normalized corpus artifacts:
+The normalization stage implements the deterministic transformation between an
+acquired raw SEC primary document and a committed, query-ready corpus version:
 
 ```text
 raw HTML bytes + FilingReference + expected SHA-256
@@ -15,13 +15,17 @@ raw HTML bytes + FilingReference + expected SHA-256
        NormalizedDocument (sections + ordered blocks + warnings)
                          |
                          v
-        manifest.json + blocks.jsonl.gz (in-memory bytes)
+              manifest.json + blocks.jsonl.gz
+                         |
+                         v
+       create-only normalized S3 objects + registry metadata
 ```
 
-The code performs no network, S3, DynamoDB, or workflow calls. It therefore
-remains fast to exercise locally and deterministic to replay. A following slice
-will load raw bytes from S3, claim normalization work in the registry, persist
-both artifacts, and expose the operation through its own Lambda handler.
+The parser and renderer remain pure local code and are fast to replay. The
+`NormalizationService` wraps that core with a separate DynamoDB claim, bounded
+and integrity-verified S3 raw read, immutable artifact publication, and an
+owned registry completion. Step Functions invokes the service through a
+dedicated Lambda after successful or previously completed acquisition.
 
 ## Input contract
 
@@ -97,6 +101,13 @@ digest makes reprocessing create-addressed and safe: a retry targets identical
 keys, a parser upgrade writes a new version, and changed source bytes cannot be
 mistaken for the previous output.
 
+The S3 storage client publishes `blocks.jsonl.gz` first and `manifest.json`
+last. Both writes use `If-None-Match: *`, an S3 checksum, encryption, and stored
+SHA-256 metadata. A retry reuses an object only when its digest and byte length
+match. Therefore the manifest is a small commit marker: consumers that discover
+it never observe a corpus version whose referenced blocks were not published
+first.
+
 ## Failure and quality policy
 
 Hard failures reject output and carry bounded machine-readable codes:
@@ -110,9 +121,10 @@ Hard failures reject output and carry bounded machine-readable codes:
 | `NO_CONTENT_BLOCKS` | No visible corpus content remained. |
 | `PARSER_RESOURCE_LIMIT` | Block or table-cell output exceeded a bound. |
 
-These failures are non-retryable at the local parser layer: repeating the same
-bytes and parser cannot change the result. The future orchestration layer may
-retry S3 or registry operations separately.
+These failures are non-retryable at the parser layer: repeating the same bytes
+and parser cannot change the result. The orchestration layer separately marks
+transient S3 and registry failures as retryable so Step Functions consumes
+retries only when another attempt can plausibly succeed.
 
 Parseable content is retained with `WARN` quality status for short documents,
 missing Item structure, missing high-value expected sections, or duplicate Item
@@ -149,18 +161,15 @@ malformed markup, quality findings, resource limits, and byte-for-byte artifact
 reproducibility. They are synthetic so the repository does not redistribute a
 company filing fixture or couple its tests to a mutable upstream document.
 
-## Deliberate next-slice boundary
+## Deployed boundary and deliberate exclusions
 
-The local implementation does not yet include:
+Terraform deploys the normalization Lambda, its private versioned corpus
+bucket, least-privilege registry/raw/corpus permissions, retained JSON logs,
+X-Ray tracing, and the acquisition-to-normalization workflow route. The Lambda
+ZIP is built from the locked Python 3.13 Linux arm64 `lxml` wheel rather than
+assuming a developer workstation binary will run in AWS.
 
-- a normalization registry state, claim/lease, or safe completion transition;
-- an S3 reader for the immutable raw object;
-- a separate normalized-artifact bucket or create-only writes;
-- a normalization Lambda package (including an architecture-compatible `lxml`
-  build), handler, metrics, or tracing;
-- Step Functions routing from successful acquisition to normalization; or
-- semantic XBRL facts, narrative expectation extraction, chunking, embeddings,
-  a RAG index, or a read API.
-
-Keeping these outside this round lets the parser contract and corpus shape be
-verified before infrastructure makes them expensive to change.
+Still outside this ingestion project are semantic XBRL facts, narrative
+expectation extraction, consumer-specific chunking, embeddings, a vector/RAG
+index, and a read API. Those are independent downstream stages or services and
+do not belong in the one-week ingestion vertical slice.

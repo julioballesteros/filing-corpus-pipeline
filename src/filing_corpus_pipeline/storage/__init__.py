@@ -5,13 +5,20 @@ from filing_corpus_pipeline.storage.dynamodb import (
     DynamoDbRegistryClient,
     DynamoDbStorageError,
     InvalidDynamoDbItemError,
+    StoredNormalizationItem,
     StoredRegistryItem,
 )
 from filing_corpus_pipeline.storage.s3 import (
+    NormalizedCorpusWrite,
+    NormalizedObjectCollisionError,
+    NormalizedObjectStorageError,
     RawObjectCollisionError,
+    RawObjectIntegrityError,
     RawObjectStorageError,
     RawObjectWrite,
+    S3NormalizedCorpusClient,
     S3RawDocumentClient,
+    StoredNormalizedCorpus,
     StoredRawObject,
 )
 
@@ -20,10 +27,17 @@ __all__ = [
     "DynamoDbRegistryClient",
     "DynamoDbStorageError",
     "InvalidDynamoDbItemError",
+    "NormalizedCorpusWrite",
+    "NormalizedObjectCollisionError",
+    "NormalizedObjectStorageError",
     "RawObjectCollisionError",
+    "RawObjectIntegrityError",
     "RawObjectStorageError",
     "RawObjectWrite",
+    "S3NormalizedCorpusClient",
     "S3RawDocumentClient",
+    "StoredNormalizationItem",
+    "StoredNormalizedCorpus",
     "StoredRawObject",
     "StoredRegistryItem",
 ]

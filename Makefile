@@ -1,5 +1,6 @@
 .PHONY: install hooks format format-check lint lint-fix typecheck test \
-	infra-format infra-format-check infra-init infra-validate infra-test check
+	lambda-package infra-format infra-format-check infra-init infra-validate \
+	infra-test check
 
 install:
 	uv sync --all-groups
@@ -28,6 +29,9 @@ typecheck:
 test:
 	uv run pytest
 
+lambda-package:
+	uv run python scripts/build_normalization_lambda.py
+
 infra-format:
 	terraform fmt -recursive infra/terraform
 
@@ -37,10 +41,10 @@ infra-format-check:
 infra-init:
 	terraform -chdir=infra/terraform init -backend=false
 
-infra-validate: infra-init
+infra-validate: lambda-package infra-init
 	terraform -chdir=infra/terraform validate
 
-infra-test: infra-init
+infra-test: lambda-package infra-init
 	terraform -chdir=infra/terraform test
 
 check: format-check lint typecheck test infra-validate infra-test

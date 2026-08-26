@@ -15,6 +15,14 @@ mock_provider "aws" {
     }
   }
 
+  override_resource {
+    target          = aws_lambda_function.normalization
+    override_during = plan
+    values = {
+      arn = "arn:aws:lambda:eu-west-1:123456789012:function:filing-corpus-pipeline-dev-normalization"
+    }
+  }
+
   override_data {
     target          = data.aws_caller_identity.current
     override_during = plan
@@ -39,6 +47,13 @@ mock_provider "aws" {
 
   override_data {
     target = data.aws_iam_policy_document.acquisition_lambda_runtime
+    values = {
+      json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.normalization_lambda_runtime
     values = {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
     }
@@ -78,6 +93,14 @@ mock_provider "aws" {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
     }
   }
+
+
+  override_data {
+    target = data.aws_iam_policy_document.normalized_corpus
+    values = {
+      json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
+    }
+  }
 }
 
 run "default_ingestion_slice" {
@@ -112,6 +135,31 @@ run "default_ingestion_slice" {
   }
 
   assert {
+    condition = (
+      aws_lambda_function.normalization.handler ==
+      "filing_corpus_pipeline.entrypoints.normalization_lambda.handler"
+    )
+    error_message = "The normalization Lambda must have its own explicit handler."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.normalization.architectures == tolist(["arm64"]) &&
+      aws_lambda_function.normalization.memory_size == 1024 &&
+      aws_lambda_function.normalization.timeout == 180
+    )
+    error_message = "Normalization must use the architecture and bounded resources of its dependency ZIP."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.normalization.environment[0].variables.NORMALIZATION_MAX_DOCUMENT_BYTES ==
+      "26214400"
+    )
+    error_message = "The normalization Lambda must receive its raw-document size bound."
+  }
+
+  assert {
     condition     = aws_lambda_function.acquisition.timeout == 90
     error_message = "The acquisition Lambda must have a bounded execution timeout."
   }
@@ -128,6 +176,8 @@ run "default_ingestion_slice" {
     condition = alltrue([
       contains(data.archive_file.discovery.excludes, "filing_corpus_pipeline/normalization/**"),
       contains(data.archive_file.acquisition.excludes, "filing_corpus_pipeline/normalization/**"),
+      contains(data.archive_file.discovery.excludes, "filing_corpus_pipeline/entrypoints/normalization_lambda.py"),
+      contains(data.archive_file.acquisition.excludes, "filing_corpus_pipeline/entrypoints/normalization_lambda.py"),
     ])
     error_message = "The existing Lambda source ZIPs must exclude the dependency-bearing normalization feature."
   }
@@ -165,6 +215,27 @@ run "default_ingestion_slice" {
   }
 
   assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.RouteAcquisition
+      .Choices[0].Next == "NormalizeFiling" &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.NormalizeFiling
+      .Parameters.Payload["filing.$"] == "$.filing"
+    )
+    error_message = "Stored raw filings must flow to normalization without carrying document bytes."
+  }
+
+  assert {
+    condition = contains(
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.NormalizeFiling.Retry[0].ErrorEquals,
+      "RetryableNormalizationError",
+    )
+    error_message = "The workflow must retry normalization failures classified as transient."
+  }
+
+  assert {
     condition = contains(
       jsondecode(aws_sfn_state_machine.discovery.definition)
       .States.AcquireFilings.ItemProcessor.States.AcquireFiling.Retry[0].ErrorEquals,
@@ -177,7 +248,7 @@ run "default_ingestion_slice" {
     condition = (
       jsondecode(aws_sfn_state_machine.discovery.definition)
       .States.AcquireFilings.ItemProcessor.States.AcquisitionFailed
-      .Parameters.outcome == "FAILED"
+      .Parameters.acquisition.outcome == "FAILED"
     )
     error_message = "One failed filing must become an isolated Map result."
   }
@@ -287,6 +358,26 @@ run "default_ingestion_slice" {
       "remove-expired-delete-markers",
     ])
     error_message = "The raw bucket must retain all cost and recovery lifecycle rules."
+  }
+
+  assert {
+    condition = startswith(
+      aws_s3_bucket.normalized_corpus.bucket,
+      "filing-corpus-pipeline-dev-normalized-123456789012-",
+    )
+    error_message = "The normalized bucket name must be stable and account-qualified."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.normalized_corpus.block_public_acls,
+      aws_s3_bucket_public_access_block.normalized_corpus.block_public_policy,
+      aws_s3_bucket_public_access_block.normalized_corpus.ignore_public_acls,
+      aws_s3_bucket_public_access_block.normalized_corpus.restrict_public_buckets,
+      aws_s3_bucket_versioning.normalized_corpus.versioning_configuration[0].status == "Enabled",
+      aws_s3_bucket.normalized_corpus.force_destroy == false,
+    ])
+    error_message = "The normalized corpus bucket must be private, versioned, and retained by default."
   }
 }
 

@@ -7,7 +7,11 @@ from filing_corpus_pipeline.registry.models import (
     ClaimRequest,
     ClaimResult,
     MarkFailedRequest,
+    MarkNormalizationFailedRequest,
+    MarkNormalizedRequest,
     MarkRawStoredRequest,
+    NormalizationClaimRequest,
+    NormalizationClaimResult,
     RegistryStatus,
 )
 from filing_corpus_pipeline.storage.dynamodb import (
@@ -15,6 +19,7 @@ from filing_corpus_pipeline.storage.dynamodb import (
     DynamoDbRegistryClient,
     DynamoDbStorageError,
     InvalidDynamoDbItemError,
+    StoredNormalizationItem,
     StoredRegistryItem,
 )
 
@@ -94,6 +99,68 @@ class FilingRegistryService:
             owner_id=request.owner_id,
         )
 
+    def claim_normalization(
+        self,
+        request: NormalizationClaimRequest,
+    ) -> NormalizationClaimResult:
+        """Claim a raw filing for one parser version or classify a duplicate."""
+        for conflict_number in range(2):
+            try:
+                previous = self._client.claim_normalization(request)
+            except ConditionalWriteFailed:
+                current = self._get_current_normalization(request.filing_key)
+                classified = self._classify_normalization_conflict(
+                    request=request,
+                    current=current,
+                )
+                if classified is not None:
+                    return classified
+                if conflict_number == 1:
+                    break
+                continue
+            except InvalidDynamoDbItemError as error:
+                raise InvalidRegistryItemError(str(error)) from error
+            except DynamoDbStorageError as error:
+                raise FilingRegistryError(
+                    "normalization claim storage operation failed"
+                ) from error
+
+            outcome = (
+                ClaimOutcome.CLAIMED
+                if previous.attempt_count == 0
+                else ClaimOutcome.RECLAIMED
+            )
+            return NormalizationClaimResult(
+                filing_key=request.filing_key,
+                outcome=outcome,
+                status=RegistryStatus.NORMALIZING,
+                attempt_count=previous.attempt_count + 1,
+                raw_document=previous.raw_document,
+                owner_id=request.owner_id,
+            )
+
+        raise RegistryConsistencyError(
+            "could not classify concurrent normalization claim for "
+            f"{request.filing_key!r}"
+        )
+
+    def mark_normalized(self, request: MarkNormalizedRequest) -> None:
+        """Publish corpus metadata if the caller still owns normalization."""
+        self._complete_owned_transition(
+            lambda: self._client.mark_normalized(request),
+            owner_id=request.owner_id,
+        )
+
+    def mark_normalization_failed(
+        self,
+        request: MarkNormalizationFailedRequest,
+    ) -> None:
+        """Record failed normalization if the caller still owns it."""
+        self._complete_owned_transition(
+            lambda: self._client.mark_normalization_failed(request),
+            owner_id=request.owner_id,
+        )
+
     @staticmethod
     def _complete_owned_transition(
         operation: Callable[[], None],
@@ -116,6 +183,19 @@ class FilingRegistryService:
             raise InvalidRegistryItemError(str(error)) from error
         except DynamoDbStorageError as error:
             raise FilingRegistryError("claim conflict lookup failed") from error
+
+    def _get_current_normalization(
+        self,
+        filing_key: str,
+    ) -> StoredNormalizationItem | None:
+        try:
+            return self._client.get_normalization(filing_key)
+        except InvalidDynamoDbItemError as error:
+            raise InvalidRegistryItemError(str(error)) from error
+        except DynamoDbStorageError as error:
+            raise FilingRegistryError(
+                "normalization claim conflict lookup failed"
+            ) from error
 
     @staticmethod
     def _classify_conflict(
@@ -145,7 +225,12 @@ class FilingRegistryService:
                 status=status,
                 attempt_count=current.attempt_count,
             )
-        if status is RegistryStatus.RAW_STORED:
+        if status in {
+            RegistryStatus.RAW_STORED,
+            RegistryStatus.NORMALIZING,
+            RegistryStatus.NORMALIZED,
+            RegistryStatus.NORMALIZATION_FAILED,
+        }:
             return ClaimResult(
                 filing_key=filing_key,
                 outcome=ClaimOutcome.ALREADY_COMPLETED,
@@ -165,3 +250,71 @@ class FilingRegistryService:
                 owner_id=current.owner_id,
             )
         raise AssertionError(f"unhandled registry status: {status}")
+
+    @staticmethod
+    def _classify_normalization_conflict(
+        *,
+        request: NormalizationClaimRequest,
+        current: StoredNormalizationItem | None,
+    ) -> NormalizationClaimResult | None:
+        if current is None:
+            raise InvalidRegistryItemError(
+                "normalization requires an acquired raw registry item"
+            )
+        try:
+            status = RegistryStatus(current.status)
+        except ValueError as error:
+            raise InvalidRegistryItemError(
+                f"unsupported registry status: {current.status!r}"
+            ) from error
+
+        if status is RegistryStatus.NORMALIZED:
+            if current.parser_version != request.parser_version:
+                return None
+            if current.corpus is None:
+                raise InvalidRegistryItemError(
+                    "NORMALIZED registry item is missing corpus metadata"
+                )
+            return NormalizationClaimResult(
+                filing_key=request.filing_key,
+                outcome=ClaimOutcome.ALREADY_COMPLETED,
+                status=status,
+                attempt_count=current.attempt_count,
+                raw_document=current.raw_document,
+                corpus=current.corpus,
+            )
+        if status is RegistryStatus.NORMALIZING:
+            if current.owner_id is None:
+                raise InvalidRegistryItemError(
+                    "NORMALIZING registry item is missing 'normalization_owner'"
+                )
+            return NormalizationClaimResult(
+                filing_key=request.filing_key,
+                outcome=ClaimOutcome.ALREADY_IN_PROGRESS,
+                status=status,
+                attempt_count=current.attempt_count,
+                raw_document=current.raw_document,
+                owner_id=current.owner_id,
+            )
+        if status is RegistryStatus.NORMALIZATION_FAILED:
+            if current.parser_version != request.parser_version:
+                return None
+            if current.retryable is None:
+                raise InvalidRegistryItemError(
+                    "NORMALIZATION_FAILED registry item is missing "
+                    "'normalization_retryable'"
+                )
+            if current.retryable:
+                return None
+            return NormalizationClaimResult(
+                filing_key=request.filing_key,
+                outcome=ClaimOutcome.NOT_RETRYABLE,
+                status=status,
+                attempt_count=current.attempt_count,
+                raw_document=current.raw_document,
+            )
+        if status is RegistryStatus.RAW_STORED:
+            return None
+        raise InvalidRegistryItemError(
+            f"filing is not ready for normalization while status is {status.value!r}"
+        )

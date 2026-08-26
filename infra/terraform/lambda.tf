@@ -9,6 +9,7 @@ data "archive_file" "discovery" {
     "filing_corpus_pipeline/acquisition/**",
     "filing_corpus_pipeline/adapters/sec/documents.py",
     "filing_corpus_pipeline/entrypoints/acquisition_lambda.py",
+    "filing_corpus_pipeline/entrypoints/normalization_lambda.py",
     "filing_corpus_pipeline/normalization/**",
     "filing_corpus_pipeline/registry/**",
     "filing_corpus_pipeline/storage/**",
@@ -31,6 +32,7 @@ data "archive_file" "acquisition" {
     "filing_corpus_pipeline/discovery/**",
     "filing_corpus_pipeline/entrypoints/cli.py",
     "filing_corpus_pipeline/entrypoints/discovery_lambda.py",
+    "filing_corpus_pipeline/entrypoints/normalization_lambda.py",
     "filing_corpus_pipeline/normalization/**",
   ]
 
@@ -121,5 +123,50 @@ resource "aws_lambda_function" "acquisition" {
   depends_on = [
     aws_cloudwatch_log_group.acquisition_lambda,
     aws_iam_role_policy.acquisition_lambda_runtime,
+  ]
+}
+
+resource "aws_cloudwatch_log_group" "normalization_lambda" {
+  name              = "/aws/lambda/${local.normalization_lambda_function_name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "normalization" {
+  function_name = local.normalization_lambda_function_name
+  description   = "Normalizes one raw SEC filing into a versioned corpus."
+  role          = aws_iam_role.normalization_lambda.arn
+
+  filename         = local.normalization_lambda_package_path
+  source_code_hash = filebase64sha256(local.normalization_lambda_package_path)
+  handler          = "filing_corpus_pipeline.entrypoints.normalization_lambda.handler"
+  runtime          = "python3.13"
+  architectures    = ["arm64"]
+
+  memory_size = 1024
+  timeout     = 180
+
+  environment {
+    variables = {
+      NORMALIZATION_LEASE_SECONDS      = tostring(var.normalization_lease_seconds)
+      NORMALIZATION_MAX_DOCUMENT_BYTES = tostring(var.normalization_max_document_bytes)
+      NORMALIZED_BUCKET_NAME           = aws_s3_bucket.normalized_corpus.bucket
+      RAW_BUCKET_NAME                  = aws_s3_bucket.raw_documents.bucket
+      REGISTRY_TABLE_NAME              = aws_dynamodb_table.filing_registry.name
+    }
+  }
+
+  logging_config {
+    application_log_level = "INFO"
+    log_format            = "JSON"
+    system_log_level      = "WARN"
+  }
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  depends_on = [
+    aws_cloudwatch_log_group.normalization_lambda,
+    aws_iam_role_policy.normalization_lambda_runtime,
   ]
 }

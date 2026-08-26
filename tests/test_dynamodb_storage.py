@@ -11,7 +11,11 @@ from filing_corpus_pipeline.registry import (
     ClaimRequest,
     FailureDetails,
     MarkFailedRequest,
+    MarkNormalizationFailedRequest,
+    MarkNormalizedRequest,
     MarkRawStoredRequest,
+    NormalizationClaimRequest,
+    NormalizedCorpusMetadata,
     RawDocumentMetadata,
 )
 from filing_corpus_pipeline.storage import (
@@ -267,3 +271,129 @@ def test_storage_requires_a_table_name() -> None:
     """Misconfigured runtime composition fails at startup."""
     with pytest.raises(ValueError, match="table_name"):
         DynamoDbRegistryClient(StubDynamoDbApi(), table_name="")
+
+
+def normalization_claim_request() -> NormalizationClaimRequest:
+    return NormalizationClaimRequest(
+        filing_key="sec#0000320193-25-000079",
+        owner_id="execution-1",
+        claimed_at=datetime(2025, 8, 1, 18, 0, tzinfo=UTC),
+        lease_duration=timedelta(minutes=10),
+        parser_version="sec-html-v2",
+    )
+
+
+def raw_attributes() -> dict[str, object]:
+    return {
+        "status": {"S": "RAW_STORED"},
+        "raw_bucket": {"S": "raw-bucket"},
+        "raw_key": {"S": "raw/sec/filing.htm"},
+        "raw_sha256": {"S": "a" * 64},
+        "raw_content_length": {"N": "1024"},
+        "raw_content_type": {"S": "text/html"},
+        "raw_version_id": {"S": "version-1"},
+        "raw_etag": {"NULL": True},
+    }
+
+
+def corpus_metadata() -> NormalizedCorpusMetadata:
+    return NormalizedCorpusMetadata(
+        bucket="normalized-bucket",
+        prefix="normalized/prefix",
+        manifest_key="normalized/prefix/manifest.json",
+        manifest_sha256="b" * 64,
+        blocks_key="normalized/prefix/blocks.jsonl.gz",
+        blocks_sha256="c" * 64,
+        parser_version="sec-html-v2",
+        schema_version="1",
+        block_count=20,
+        section_count=3,
+        warning_count=1,
+        quality_status="WARN",
+    )
+
+
+def test_claim_normalization_serializes_lease_and_returns_raw_metadata() -> None:
+    api = StubDynamoDbApi(updates=[{"Attributes": raw_attributes()}])
+
+    previous = storage(api).claim_normalization(normalization_claim_request())
+
+    assert previous.status == "RAW_STORED"
+    assert previous.attempt_count == 0
+    assert previous.raw_document.version_id == "version-1"
+    call = api.update_calls[0]
+    assert "#status = :raw_stored" in str(call["ConditionExpression"])
+    assert "#normalization_parser_version <> :parser_version" in str(
+        call["ConditionExpression"]
+    )
+    values = call["ExpressionAttributeValues"]
+    assert isinstance(values, dict)
+    assert values[":lease_expires_at_epoch"] == {"N": "1754071800"}
+
+
+def test_get_normalization_deserializes_committed_corpus_metadata() -> None:
+    item = {
+        **raw_attributes(),
+        "status": {"S": "NORMALIZED"},
+        "normalization_attempt_count": {"N": "2"},
+        "normalization_parser_version": {"S": "sec-html-v2"},
+        "normalized_bucket": {"S": "normalized-bucket"},
+        "normalized_prefix": {"S": "normalized/prefix"},
+        "normalized_manifest_key": {"S": "normalized/prefix/manifest.json"},
+        "normalized_manifest_sha256": {"S": "b" * 64},
+        "normalized_blocks_key": {"S": "normalized/prefix/blocks.jsonl.gz"},
+        "normalized_blocks_sha256": {"S": "c" * 64},
+        "normalization_schema_version": {"S": "1"},
+        "normalized_block_count": {"N": "20"},
+        "normalized_section_count": {"N": "3"},
+        "normalized_warning_count": {"N": "1"},
+        "normalized_quality_status": {"S": "WARN"},
+    }
+    api = StubDynamoDbApi(reads=[{"Item": item}])
+
+    current = storage(api).get_normalization("sec#filing")
+
+    assert current is not None
+    assert current.corpus == corpus_metadata()
+    assert current.attempt_count == 2
+    assert api.get_calls[0]["ConsistentRead"] is True
+
+
+def test_mark_normalized_serializes_corpus_and_ownership_condition() -> None:
+    api = StubDynamoDbApi()
+    request = MarkNormalizedRequest(
+        filing_key="sec#filing",
+        owner_id="execution-1",
+        normalized_at=datetime(2025, 8, 1, 18, 2, tzinfo=UTC),
+        corpus=corpus_metadata(),
+    )
+
+    storage(api).mark_normalized(request)
+
+    call = api.update_calls[0]
+    assert call["ConditionExpression"] == (
+        "#status = :normalizing AND #normalization_owner = :owner"
+    )
+    values = call["ExpressionAttributeValues"]
+    assert isinstance(values, dict)
+    assert values[":normalized_block_count"] == {"N": "20"}
+    assert values[":normalized_quality_status"] == {"S": "WARN"}
+
+
+def test_mark_normalization_failed_uses_separate_diagnostics() -> None:
+    api = StubDynamoDbApi()
+    request = MarkNormalizationFailedRequest(
+        filing_key="sec#filing",
+        owner_id="execution-1",
+        failed_at=datetime(2025, 8, 1, 18, 2, tzinfo=UTC),
+        parser_version="sec-html-v2",
+        failure=FailureDetails("NO_CONTENT", "no visible content", False),
+    )
+
+    storage(api).mark_normalization_failed(request)
+
+    call = api.update_calls[0]
+    assert "#normalization_error_code = :error_code" in str(call["UpdateExpression"])
+    values = call["ExpressionAttributeValues"]
+    assert isinstance(values, dict)
+    assert values[":retryable"] == {"BOOL": False}

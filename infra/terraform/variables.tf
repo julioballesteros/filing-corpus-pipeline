@@ -152,6 +152,12 @@ variable "raw_bucket_force_destroy" {
   default     = false
 }
 
+variable "normalized_bucket_force_destroy" {
+  description = "Allow Terraform to delete all normalized corpus versions during bucket destruction."
+  type        = bool
+  default     = false
+}
+
 variable "acquisition_map_max_concurrency" {
   description = "Maximum filing acquisitions executed concurrently by Step Functions."
   type        = number
@@ -194,6 +200,37 @@ variable "acquisition_max_document_bytes" {
       floor(var.acquisition_max_document_bytes) == var.acquisition_max_document_bytes
     )
     error_message = "acquisition_max_document_bytes must be an integer from 1 MiB through 50 MiB."
+  }
+}
+
+variable "normalization_lease_seconds" {
+  description = "Registry claim lease assigned to each normalization invocation."
+  type        = number
+  default     = 600
+
+  validation {
+    condition = (
+      var.normalization_lease_seconds >= 180 &&
+      var.normalization_lease_seconds <= 3600 &&
+      floor(var.normalization_lease_seconds) == var.normalization_lease_seconds
+    )
+    error_message = "normalization_lease_seconds must be an integer from 180 through 3600."
+  }
+}
+
+variable "normalization_max_document_bytes" {
+  description = "Maximum raw filing size loaded and parsed by normalization."
+  type        = number
+  default     = 26214400
+
+  validation {
+    condition = (
+      var.normalization_max_document_bytes >= 1048576 &&
+      var.normalization_max_document_bytes <= 52428800 &&
+      floor(var.normalization_max_document_bytes) == var.normalization_max_document_bytes &&
+      var.normalization_max_document_bytes <= var.acquisition_max_document_bytes
+    )
+    error_message = "normalization_max_document_bytes must be 1-50 MiB and no larger than the acquisition limit."
   }
 }
 

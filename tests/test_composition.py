@@ -8,6 +8,10 @@ from filing_corpus_pipeline.acquisition import AcquisitionService
 from filing_corpus_pipeline.acquisition import composition as acquisition_composition
 from filing_corpus_pipeline.discovery import DiscoveryService
 from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
+from filing_corpus_pipeline.normalization import NormalizationService
+from filing_corpus_pipeline.normalization import (
+    composition as normalization_composition,
+)
 
 
 def test_discovery_composition_builds_the_sec_service() -> None:
@@ -64,3 +68,27 @@ def test_acquisition_composition_loads_the_managed_runtime_sdk(
     assert acquisition_composition._aws_client("s3") is not None
     assert requested_modules == ["boto3"]
     assert clients == ["s3"]
+
+
+def test_normalization_composition_shares_one_s3_client() -> None:
+    """The normalization graph requests DynamoDB and one low-level S3 client."""
+    services: list[str] = []
+
+    def aws_client(service_name: str) -> object:
+        services.append(service_name)
+        return object()
+
+    original = normalization_composition._aws_client
+    normalization_composition._aws_client = aws_client
+    try:
+        service = normalization_composition.build_sec_normalization_service(
+            registry_table_name="registry",
+            raw_bucket_name="raw",
+            normalized_bucket_name="normalized",
+            max_document_bytes=1024,
+        )
+    finally:
+        normalization_composition._aws_client = original
+
+    assert isinstance(service, NormalizationService)
+    assert services == ["dynamodb", "s3"]

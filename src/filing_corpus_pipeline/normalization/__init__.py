@@ -14,6 +14,9 @@ from filing_corpus_pipeline.normalization.models import (
     DocumentBlock,
     DocumentParseError,
     DocumentSection,
+    NormalizationOutcome,
+    NormalizationRequest,
+    NormalizationResult,
     NormalizedDocument,
     ParseWarning,
     QualityStatus,
@@ -21,6 +24,12 @@ from filing_corpus_pipeline.normalization.models import (
     SecHtmlParserConfig,
 )
 from filing_corpus_pipeline.normalization.sec_html import SecHtmlNormalizer
+from filing_corpus_pipeline.normalization.service import (
+    NormalizationError,
+    NormalizationService,
+    PermanentNormalizationError,
+    RetryableNormalizationError,
+)
 
 __all__ = [
     "BLOCKS_FILENAME",
@@ -32,10 +41,17 @@ __all__ = [
     "DocumentParseError",
     "DocumentSection",
     "NormalizationArtifacts",
+    "NormalizationError",
+    "NormalizationOutcome",
+    "NormalizationRequest",
+    "NormalizationResult",
+    "NormalizationService",
     "NormalizedDocument",
     "ParseWarning",
+    "PermanentNormalizationError",
     "QualityStatus",
     "RawFilingDocument",
+    "RetryableNormalizationError",
     "SecHtmlNormalizer",
     "SecHtmlParserConfig",
     "normalized_document_prefix",

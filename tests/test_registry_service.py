@@ -14,7 +14,11 @@ from filing_corpus_pipeline.registry import (
     FilingRegistryService,
     InvalidRegistryItemError,
     MarkFailedRequest,
+    MarkNormalizationFailedRequest,
+    MarkNormalizedRequest,
     MarkRawStoredRequest,
+    NormalizationClaimRequest,
+    NormalizedCorpusMetadata,
     RawDocumentMetadata,
     RegistryConsistencyError,
     RegistryLeaseLostError,
@@ -25,6 +29,7 @@ from filing_corpus_pipeline.storage import (
     DynamoDbRegistryClient,
     DynamoDbStorageError,
     InvalidDynamoDbItemError,
+    StoredNormalizationItem,
     StoredRegistryItem,
 )
 
@@ -38,13 +43,21 @@ class StubRegistryClient:
         claims: list[StoredRegistryItem | Exception | None] | None = None,
         reads: list[StoredRegistryItem | Exception | None] | None = None,
         terminal_error: Exception | None = None,
+        normalization_claims: list[StoredNormalizationItem | Exception] | None = None,
+        normalization_reads: (
+            list[StoredNormalizationItem | Exception | None] | None
+        ) = None,
     ) -> None:
         self.claims = list(claims or [None])
         self.reads = list(reads or [])
         self.terminal_error = terminal_error
+        self.normalization_claims = list(normalization_claims or [])
+        self.normalization_reads = list(normalization_reads or [])
         self.claim_calls: list[ClaimRequest] = []
         self.stored_calls: list[MarkRawStoredRequest] = []
         self.failed_calls: list[MarkFailedRequest] = []
+        self.normalized_calls: list[MarkNormalizedRequest] = []
+        self.normalization_failed_calls: list[MarkNormalizationFailedRequest] = []
 
     def claim(self, request: ClaimRequest) -> StoredRegistryItem | None:
         self.claim_calls.append(request)
@@ -67,6 +80,34 @@ class StubRegistryClient:
 
     def mark_failed(self, request: MarkFailedRequest) -> None:
         self.failed_calls.append(request)
+        if self.terminal_error is not None:
+            raise self.terminal_error
+
+    def claim_normalization(
+        self, request: NormalizationClaimRequest
+    ) -> StoredNormalizationItem:
+        del request
+        result = self.normalization_claims.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def get_normalization(self, filing_key: str) -> StoredNormalizationItem | None:
+        del filing_key
+        result = self.normalization_reads.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def mark_normalized(self, request: MarkNormalizedRequest) -> None:
+        self.normalized_calls.append(request)
+        if self.terminal_error is not None:
+            raise self.terminal_error
+
+    def mark_normalization_failed(
+        self, request: MarkNormalizationFailedRequest
+    ) -> None:
+        self.normalization_failed_calls.append(request)
         if self.terminal_error is not None:
             raise self.terminal_error
 
@@ -135,6 +176,24 @@ def test_claim_reports_first_and_recovered_work() -> None:
             stored_item("RAW_STORED", attempts=2),
             ClaimOutcome.ALREADY_COMPLETED,
             RegistryStatus.RAW_STORED,
+            None,
+        ),
+        (
+            stored_item("NORMALIZING", attempts=2),
+            ClaimOutcome.ALREADY_COMPLETED,
+            RegistryStatus.NORMALIZING,
+            None,
+        ),
+        (
+            stored_item("NORMALIZED", attempts=2),
+            ClaimOutcome.ALREADY_COMPLETED,
+            RegistryStatus.NORMALIZED,
+            None,
+        ),
+        (
+            stored_item("NORMALIZATION_FAILED", attempts=2),
+            ClaimOutcome.ALREADY_COMPLETED,
+            RegistryStatus.NORMALIZATION_FAILED,
             None,
         ),
         (
@@ -292,3 +351,164 @@ def test_terminal_transition_translates_storage_failure() -> None:
 
     with pytest.raises(FilingRegistryError, match="storage update"):
         registry.mark_failed(failed_request())
+
+
+def normalization_request(
+    parser_version: str = "sec-html-v2",
+) -> NormalizationClaimRequest:
+    return NormalizationClaimRequest(
+        filing_key="sec#filing",
+        owner_id="execution-1",
+        claimed_at=datetime(2025, 8, 1, tzinfo=UTC),
+        lease_duration=timedelta(minutes=10),
+        parser_version=parser_version,
+    )
+
+
+def normalized_corpus() -> NormalizedCorpusMetadata:
+    return NormalizedCorpusMetadata(
+        bucket="normalized",
+        prefix="normalized/prefix",
+        manifest_key="normalized/prefix/manifest.json",
+        manifest_sha256="a" * 64,
+        blocks_key="normalized/prefix/blocks.jsonl.gz",
+        blocks_sha256="b" * 64,
+        parser_version="sec-html-v2",
+        schema_version="1",
+        block_count=10,
+        section_count=2,
+        warning_count=0,
+        quality_status="PASS",
+    )
+
+
+def normalization_item(
+    status: str,
+    *,
+    attempts: int = 0,
+    parser_version: str | None = None,
+    owner: str | None = None,
+    retryable: bool | None = None,
+    corpus: NormalizedCorpusMetadata | None = None,
+) -> StoredNormalizationItem:
+    return StoredNormalizationItem(
+        status=status,
+        attempt_count=attempts,
+        raw_document=raw_stored_request().document,
+        parser_version=parser_version,
+        owner_id=owner,
+        retryable=retryable,
+        corpus=corpus,
+    )
+
+
+def test_normalization_claim_reports_first_and_recovered_work() -> None:
+    first = service(
+        StubRegistryClient(normalization_claims=[normalization_item("RAW_STORED")])
+    ).claim_normalization(normalization_request())
+    recovered = service(
+        StubRegistryClient(
+            normalization_claims=[
+                normalization_item(
+                    "NORMALIZATION_FAILED",
+                    attempts=2,
+                    parser_version="sec-html-v2",
+                    retryable=True,
+                )
+            ]
+        )
+    ).claim_normalization(normalization_request())
+
+    assert first.outcome is ClaimOutcome.CLAIMED
+    assert first.status is RegistryStatus.NORMALIZING
+    assert first.attempt_count == 1
+    assert recovered.outcome is ClaimOutcome.RECLAIMED
+    assert recovered.attempt_count == 3
+
+
+@pytest.mark.parametrize(
+    ("current", "outcome"),
+    [
+        (
+            normalization_item(
+                "NORMALIZED",
+                attempts=1,
+                parser_version="sec-html-v2",
+                corpus=normalized_corpus(),
+            ),
+            ClaimOutcome.ALREADY_COMPLETED,
+        ),
+        (
+            normalization_item("NORMALIZING", attempts=1, owner="other"),
+            ClaimOutcome.ALREADY_IN_PROGRESS,
+        ),
+        (
+            normalization_item(
+                "NORMALIZATION_FAILED",
+                attempts=1,
+                parser_version="sec-html-v2",
+                retryable=False,
+            ),
+            ClaimOutcome.NOT_RETRYABLE,
+        ),
+    ],
+)
+def test_normalization_claim_classifies_duplicate_states(
+    current: StoredNormalizationItem,
+    outcome: ClaimOutcome,
+) -> None:
+    registry = service(
+        StubRegistryClient(
+            normalization_claims=[ConditionalWriteFailed("conflict")],
+            normalization_reads=[current],
+        )
+    )
+
+    result = registry.claim_normalization(normalization_request())
+
+    assert result.outcome is outcome
+    assert result.acquired is False
+
+
+def test_new_parser_version_reclaims_a_previous_normalized_item() -> None:
+    old = normalization_item(
+        "NORMALIZED",
+        attempts=1,
+        parser_version="sec-html-v1",
+        corpus=normalized_corpus(),
+    )
+    client = StubRegistryClient(
+        normalization_claims=[ConditionalWriteFailed("race"), old],
+        normalization_reads=[old],
+    )
+
+    result = service(client).claim_normalization(normalization_request())
+
+    assert result.outcome is ClaimOutcome.RECLAIMED
+    assert result.attempt_count == 2
+
+
+def test_normalization_terminal_transitions_delegate_and_protect_the_lease() -> None:
+    corpus = normalized_corpus()
+    normalized = MarkNormalizedRequest(
+        "sec#filing", "execution-1", datetime.now(UTC), corpus
+    )
+    failed = MarkNormalizationFailedRequest(
+        "sec#filing",
+        "execution-1",
+        datetime.now(UTC),
+        "sec-html-v2",
+        FailureDetails("PARSE", "bad filing", False),
+    )
+    client = StubRegistryClient()
+    registry = service(client)
+
+    registry.mark_normalized(normalized)
+    registry.mark_normalization_failed(failed)
+
+    assert client.normalized_calls == [normalized]
+    assert client.normalization_failed_calls == [failed]
+
+    lost = service(StubRegistryClient(terminal_error=ConditionalWriteFailed("lost")))
+    with pytest.raises(RegistryLeaseLostError):
+        lost.mark_normalized(normalized)

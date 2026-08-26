@@ -3,14 +3,20 @@
 import base64
 from collections.abc import Mapping
 from hashlib import sha256
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 
+from filing_corpus_pipeline.registry import RawDocumentMetadata
 from filing_corpus_pipeline.storage import (
+    NormalizedCorpusWrite,
+    NormalizedObjectCollisionError,
+    NormalizedObjectStorageError,
     RawObjectCollisionError,
+    RawObjectIntegrityError,
     RawObjectStorageError,
     RawObjectWrite,
+    S3NormalizedCorpusClient,
     S3RawDocumentClient,
 )
 
@@ -43,11 +49,14 @@ class StubS3Api:
         *,
         puts: list[Mapping[str, object] | Exception] | None = None,
         heads: list[Mapping[str, object] | Exception] | None = None,
+        gets: list[Mapping[str, object] | Exception] | None = None,
     ) -> None:
         self.puts = list(puts or [{}])
         self.heads = list(heads or [])
+        self.gets = list(gets or [])
         self.put_calls: list[dict[str, object]] = []
         self.head_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
 
     def put_object(self, **kwargs: object) -> Mapping[str, object]:
         self.put_calls.append(kwargs)
@@ -62,6 +71,25 @@ class StubS3Api:
         if isinstance(result, Exception):
             raise result
         return result
+
+    def get_object(self, **kwargs: object) -> Mapping[str, object]:
+        self.get_calls.append(kwargs)
+        result = self.gets.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class BodyStream:
+    """Bounded in-memory stand-in for botocore's streaming response body."""
+
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+        self.amounts: list[int | None] = []
+
+    def read(self, amt: int | None = None) -> bytes:
+        self.amounts.append(amt)
+        return self.body if amt is None else self.body[:amt]
 
 
 BODY = b"<html>filing</html>"
@@ -222,3 +250,132 @@ def test_storage_requires_a_bucket_name() -> None:
     """A missing runtime setting is caught during composition."""
     with pytest.raises(ValueError):
         S3RawDocumentClient(StubS3Api(), bucket_name="")
+
+
+def raw_metadata(**overrides: object) -> RawDocumentMetadata:
+    values: dict[str, object] = {
+        "bucket": "filing-corpus-raw",
+        "key": "raw/sec/320193/accession/report.htm",
+        "sha256": DIGEST,
+        "content_length": len(BODY),
+        "content_type": "text/html",
+        "version_id": "version-1",
+    }
+    values.update(overrides)
+    return RawDocumentMetadata(**values)  # type: ignore[arg-type]
+
+
+def test_load_reads_a_version_and_verifies_length_and_digest() -> None:
+    stream = BodyStream(BODY)
+    api = StubS3Api(gets=[{"ContentLength": len(BODY), "Body": stream}])
+
+    loaded = storage(api).load(raw_metadata(), max_bytes=1024)
+
+    assert loaded == BODY
+    assert stream.amounts == [1025]
+    assert api.get_calls[0]["VersionId"] == "version-1"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "response", "code"),
+    [
+        (raw_metadata(bucket="other"), None, "RAW_BUCKET_MISMATCH"),
+        (raw_metadata(content_length=2048), None, "RAW_OBJECT_TOO_LARGE"),
+        (
+            raw_metadata(),
+            {"ContentLength": len(BODY) + 1, "Body": BodyStream(BODY)},
+            "RAW_OBJECT_LENGTH_MISMATCH",
+        ),
+        (
+            raw_metadata(sha256="0" * 64),
+            {"ContentLength": len(BODY), "Body": BodyStream(BODY)},
+            "RAW_OBJECT_DIGEST_MISMATCH",
+        ),
+    ],
+)
+def test_load_rejects_registry_or_object_integrity_mismatches(
+    metadata: RawDocumentMetadata,
+    response: Mapping[str, object] | None,
+    code: str,
+) -> None:
+    api = StubS3Api(gets=[response] if response is not None else None)
+
+    with pytest.raises(RawObjectIntegrityError) as raised:
+        storage(api).load(metadata, max_bytes=1024)
+
+    assert raised.value.code == code
+
+
+def corpus_write() -> NormalizedCorpusWrite:
+    manifest = b'{"schema_version":"1"}\n'
+    blocks = b"compressed-blocks"
+    return NormalizedCorpusWrite(
+        prefix="normalized/sec/320193/accession/sec-html-v2/source",
+        manifest=manifest,
+        manifest_sha256=sha256(manifest).hexdigest(),
+        blocks=blocks,
+        blocks_sha256=sha256(blocks).hexdigest(),
+        filing_key="sec#accession",
+        parser_version="sec-html-v2",
+        source_sha256=DIGEST,
+    )
+
+
+def test_normalized_store_publishes_blocks_before_manifest() -> None:
+    api = StubS3Api(puts=[{}, {}])
+    client = S3NormalizedCorpusClient(api, bucket_name="filing-corpus-normalized")
+
+    result = client.store(corpus_write())
+
+    assert cast(str, api.put_calls[0]["Key"]).endswith("/blocks.jsonl.gz")
+    assert api.put_calls[0]["ContentEncoding"] == "gzip"
+    assert cast(str, api.put_calls[1]["Key"]).endswith("/manifest.json")
+    assert "ContentEncoding" not in api.put_calls[1]
+    assert all(call["IfNoneMatch"] == "*" for call in api.put_calls)
+    assert result.reused_blocks is False
+    assert result.reused_manifest is False
+
+
+def test_normalized_store_reuses_an_identical_complete_corpus() -> None:
+    request = corpus_write()
+    api = StubS3Api(
+        puts=[PreconditionFailed(), PreconditionFailed()],
+        heads=[
+            {
+                "Metadata": {"sha256": request.blocks_sha256},
+                "ContentLength": len(request.blocks),
+            },
+            {
+                "Metadata": {"sha256": request.manifest_sha256},
+                "ContentLength": len(request.manifest),
+            },
+        ],
+    )
+
+    result = S3NormalizedCorpusClient(
+        api, bucket_name="filing-corpus-normalized"
+    ).store(request)
+
+    assert result.reused_blocks is True
+    assert result.reused_manifest is True
+    assert len(api.head_calls) == 2
+
+
+def test_normalized_store_rejects_different_bytes_at_a_versioned_key() -> None:
+    request = corpus_write()
+    api = StubS3Api(
+        puts=[PreconditionFailed()],
+        heads=[{"Metadata": {"sha256": "0" * 64}, "ContentLength": 1}],
+    )
+
+    with pytest.raises(NormalizedObjectCollisionError):
+        S3NormalizedCorpusClient(api, bucket_name="normalized").store(request)
+
+
+def test_normalized_store_classifies_sdk_failures() -> None:
+    api = StubS3Api(puts=[AwsError("SlowDown", 503)])
+
+    with pytest.raises(NormalizedObjectStorageError) as raised:
+        S3NormalizedCorpusClient(api, bucket_name="normalized").store(corpus_write())
+
+    assert raised.value.retryable is True

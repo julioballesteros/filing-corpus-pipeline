@@ -50,8 +50,8 @@ contact address and do not commit it to the repository.
   mapping. Future document providers belong beside it.
 - `registry`: filing claim models and the concrete registry service.
 - `storage`: narrow DynamoDB and S3 clients plus SDK serialization details.
-- `entrypoints`: separate thin handlers for discovery and acquisition plus the
-  local discovery CLI.
+- `entrypoints`: separate thin handlers for discovery, acquisition, and
+  normalization plus the local discovery CLI.
 
 Acquisition and normalization consume `FilingReference` records without
 depending on SEC metadata response formats.
@@ -119,8 +119,24 @@ claim owner, and the Task entry time used to start the lease:
 ```
 
 Feature-specific composition lives in `discovery/composition.py` and
-`acquisition/composition.py`; the handlers only validate runtime input and
-configuration, call their service, log the bounded result, and serialize it.
+the corresponding `acquisition` and `normalization` packages; the handlers only
+validate runtime input and configuration, call their service, log the bounded
+result, and serialize it.
+
+## Lambda normalization contract
+
+After acquisition reports `RAW_STORED` or `ALREADY_COMPLETED`, the same Map
+iteration invokes:
+
+```text
+filing_corpus_pipeline.entrypoints.normalization_lambda.handler
+```
+
+It receives the same provider-neutral filing record, workflow owner, and Task
+timestamp. It does not receive document bytes or trust acquisition output for
+storage identity: it atomically claims normalization in DynamoDB, loads the raw
+bucket/key/version recorded by acquisition, verifies length and SHA-256, and
+returns only committed corpus metadata.
 
 ## AWS ingestion slice
 
@@ -132,43 +148,47 @@ EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
                                             +-> bounded Map
                                                   |
                                                   +-> acquisition Lambda
-                                                        |-> SEC document
+                                                  |     |-> SEC document
+                                                  |     |-> DynamoDB registry
+                                                  |     +-> S3 raw object
+                                                  |
+                                                  +-> normalization Lambda
+                                                        |-> S3 raw object
                                                         |-> DynamoDB registry
-                                                        +-> S3 raw object
+                                                        +-> S3 normalized corpus
 ```
 
 Step Functions owns the execution history, per-filing concurrency, and retry
-policy. The two deployed Lambdas use small, dependency-free source ZIPs with
-explicit handlers, resource bounds, JSON logs, retained CloudWatch log groups,
-and X-Ray tracing. Their packages explicitly exclude the local normalizer and
-its compiled HTML-parser dependency until a dedicated normalization Lambda is
-added.
+policy. Discovery and acquisition use small dependency-free source ZIPs. The
+normalization ZIP is built reproducibly for Python 3.13 on Lambda arm64 and
+contains the pinned Linux `lxml` wheel. All three functions have explicit
+handlers, resource bounds, JSON logs, retained CloudWatch log groups, and X-Ray
+tracing.
 EventBridge sends the scheduled timestamp plus the configured watchlist and
 lookback window. Reserved concurrency is available as an opt-in control for AWS
 accounts with sufficient regional quota.
 
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and
-logs, verify the corresponding registry records and raw objects, and only then
-enable recurring ingestion. Deployment and persistence of document processing
-remain later workflow stages; deterministic document normalization is
-implemented and tested locally.
+logs, verify the registry plus raw and normalized objects, and only then enable
+recurring ingestion.
 
-## Local document normalization
+## Document normalization
 
 The first processing round converts one acquired SEC primary HTML document
 into a provider-neutral `NormalizedDocument`. It removes non-content and hidden
 inline-XBRL infrastructure, emits ordered text/table blocks, maps 10-K and 10-Q
 Item headings to canonical section names, and reports non-fatal quality
 findings. The result renders as a self-describing `manifest.json` plus
-reproducible `blocks.jsonl.gz` bytes.
+reproducible `blocks.jsonl.gz` bytes. In AWS, blocks are written create-only
+before `manifest.json`; the manifest is the commit marker downstream consumers
+can use to distinguish a complete corpus version. Parser upgrades safely
+reclaim a filing and publish under a new versioned prefix.
 
-This round deliberately has no AWS reads or writes, registry transitions,
-Lambda handler, or Step Functions state. Those integration concerns form the
-next slice. Semantic XBRL fact extraction also remains a separate future stage;
-the normalizer preserves visible inline-XBRL values as document text and table
-cells. See [`docs/normalization.md`](docs/normalization.md) for contracts,
-failure policy, versioning, and local usage.
+Semantic XBRL fact extraction remains a separate future stage; the normalizer
+preserves visible inline-XBRL values as document text and table cells. See
+[`docs/normalization.md`](docs/normalization.md) for contracts, failure policy,
+versioning, storage ordering, and local usage.
 
 ## Filing registry
 
@@ -178,10 +198,12 @@ race-prone read followed by a write. Claims carry an owner and an expiry, so a
 Step Functions retry can resume its own work and a later execution can recover
 an abandoned lease.
 
-The initial persisted states are `FETCHING`, `RAW_STORED`, and `FAILED`.
-Retryable failures can be reclaimed; permanent failures remain visible without
-being retried on every overlapping discovery run. Only the active owner may
-mark a filing stored or failed. See
+The persisted lifecycle continues through `NORMALIZING`, `NORMALIZED`, and
+`NORMALIZATION_FAILED`. Acquisition and normalization have separate leases,
+attempt counts, and bounded failures. Retryable failures can be reclaimed;
+permanent failures remain visible, while a new parser version may intentionally
+reprocess an old result or permanent parser failure. Only the active owner may
+complete a transition. See
 [`docs/filing-registry.md`](docs/filing-registry.md) for the item schema,
 transition rules, and recovery cases.
 
@@ -221,6 +243,7 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 terraform fmt -check -recursive infra/terraform
+uv run python scripts/build_normalization_lambda.py
 terraform -chdir=infra/terraform init -backend=false
 terraform -chdir=infra/terraform validate
 terraform -chdir=infra/terraform test
@@ -228,7 +251,8 @@ terraform -chdir=infra/terraform test
 
 The same commands are available through `make format`, `make lint`,
 `make typecheck`, `make test`, `make infra-validate`, `make infra-test`, and
-`make check`.
+`make check`. Infrastructure validation and tests build the normalization ZIP
+automatically.
 
 
 GitHub Actions runs the Python quality suite and credential-free Terraform plan

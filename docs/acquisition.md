@@ -87,6 +87,9 @@ or a generic storage abstraction for the first release.
 The parent workflow supplies its execution ARN as `claim_owner` and the Map
 Task entry timestamp as the lease start. Map concurrency defaults to two and is
 configurable up to five, keeping SEC request pressure and Lambda cost bounded.
-After retries, an item failure becomes a small `FAILED` result containing its
-provider identity and error type; it does not prevent unrelated filings from
-being acquired. Full failure diagnostics remain in the registry and logs.
+`RAW_STORED` and `ALREADY_COMPLETED` route to the normalization Task in the same
+Map iteration. Other dispositions stop without attempting to read an
+incomplete raw object. After retries, an acquisition failure becomes a small
+`FAILED` stage result containing its provider identity and error type; it does
+not prevent unrelated filings from progressing. Full diagnostics remain in the
+registry and logs.

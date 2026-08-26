@@ -10,11 +10,14 @@ from filing_corpus_pipeline.domain import FilingReference
 
 
 class RegistryStatus(StrEnum):
-    """Acquisition states persisted for a filing."""
+    """Lifecycle states persisted for a filing."""
 
     FETCHING = "FETCHING"
     RAW_STORED = "RAW_STORED"
     FAILED = "FAILED"
+    NORMALIZING = "NORMALIZING"
+    NORMALIZED = "NORMALIZED"
+    NORMALIZATION_FAILED = "NORMALIZATION_FAILED"
 
 
 class ClaimOutcome(StrEnum):
@@ -136,6 +139,103 @@ class RawDocumentMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class NormalizedCorpusMetadata:
+    """Durable identity and quality summary for one normalized corpus version."""
+
+    bucket: str
+    prefix: str
+    manifest_key: str
+    manifest_sha256: str
+    blocks_key: str
+    blocks_sha256: str
+    parser_version: str
+    schema_version: str
+    block_count: int
+    section_count: int
+    warning_count: int
+    quality_status: str
+
+    def __post_init__(self) -> None:
+        for field in (
+            "bucket",
+            "prefix",
+            "manifest_key",
+            "blocks_key",
+            "parser_version",
+            "schema_version",
+            "quality_status",
+        ):
+            _require_nonempty(str(getattr(self, field)), field=field)
+        for field in ("manifest_sha256", "blocks_sha256"):
+            digest = str(getattr(self, field))
+            if len(digest) != 64 or any(
+                character not in hexdigits for character in digest
+            ):
+                raise ValueError(f"{field} must be a 64-character hexadecimal digest")
+        for field in ("block_count", "section_count", "warning_count"):
+            if getattr(self, field) < 0:
+                raise ValueError(f"{field} must not be negative")
+
+    def to_dict(self) -> dict[str, str | int]:
+        """Return the workflow-safe corpus identity and summary."""
+        return {
+            "bucket": self.bucket,
+            "prefix": self.prefix,
+            "manifest_key": self.manifest_key,
+            "manifest_sha256": self.manifest_sha256.lower(),
+            "blocks_key": self.blocks_key,
+            "blocks_sha256": self.blocks_sha256.lower(),
+            "parser_version": self.parser_version,
+            "schema_version": self.schema_version,
+            "block_count": self.block_count,
+            "section_count": self.section_count,
+            "warning_count": self.warning_count,
+            "quality_status": self.quality_status,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizationClaimRequest:
+    """Request to atomically acquire normalization work for one raw filing."""
+
+    filing_key: str
+    owner_id: str
+    claimed_at: datetime
+    lease_duration: timedelta
+    parser_version: str
+
+    def __post_init__(self) -> None:
+        for field in ("filing_key", "owner_id", "parser_version"):
+            _require_nonempty(str(getattr(self, field)), field=field)
+        _require_aware(self.claimed_at, field="claimed_at")
+        if self.lease_duration <= timedelta(0):
+            raise ValueError("lease_duration must be positive")
+        if self.lease_duration > timedelta(days=1):
+            raise ValueError("lease_duration must not exceed one day")
+
+    @property
+    def lease_expires_at(self) -> datetime:
+        return self.claimed_at.astimezone(UTC) + self.lease_duration
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizationClaimResult:
+    """Decision and source metadata returned by a normalization claim."""
+
+    filing_key: str
+    outcome: ClaimOutcome
+    status: RegistryStatus
+    attempt_count: int
+    raw_document: RawDocumentMetadata
+    corpus: NormalizedCorpusMetadata | None = None
+    owner_id: str | None = None
+
+    @property
+    def acquired(self) -> bool:
+        return self.outcome in {ClaimOutcome.CLAIMED, ClaimOutcome.RECLAIMED}
+
+
+@dataclass(frozen=True, slots=True)
 class MarkRawStoredRequest:
     """Request to complete acquisition while still holding its claim."""
 
@@ -179,4 +279,35 @@ class MarkFailedRequest:
     def __post_init__(self) -> None:
         _require_nonempty(self.filing_key, field="filing_key")
         _require_nonempty(self.owner_id, field="owner_id")
+        _require_aware(self.failed_at, field="failed_at")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkNormalizedRequest:
+    """Request to publish a corpus while still holding its normalization claim."""
+
+    filing_key: str
+    owner_id: str
+    normalized_at: datetime
+    corpus: NormalizedCorpusMetadata
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.filing_key, field="filing_key")
+        _require_nonempty(self.owner_id, field="owner_id")
+        _require_aware(self.normalized_at, field="normalized_at")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkNormalizationFailedRequest:
+    """Request to release normalization work and retain failure diagnostics."""
+
+    filing_key: str
+    owner_id: str
+    failed_at: datetime
+    parser_version: str
+    failure: FailureDetails
+
+    def __post_init__(self) -> None:
+        for field in ("filing_key", "owner_id", "parser_version"):
+            _require_nonempty(str(getattr(self, field)), field=field)
         _require_aware(self.failed_at, field="failed_at")

@@ -3,7 +3,10 @@
 import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import NoReturn, Protocol
+
+from filing_corpus_pipeline.registry.models import RawDocumentMetadata
 
 
 class S3Api(Protocol):
@@ -14,6 +17,16 @@ class S3Api(Protocol):
 
     def head_object(self, **kwargs: object) -> Mapping[str, object]:
         """Read object integrity and version metadata."""
+
+    def get_object(self, **kwargs: object) -> Mapping[str, object]:
+        """Read one bounded object body."""
+
+
+class ReadableBody(Protocol):
+    """Subset of botocore StreamingBody used by the storage client."""
+
+    def read(self, amt: int | None = None) -> bytes:
+        """Read at most ``amt`` bytes."""
 
 
 class RawObjectStorageError(RuntimeError):
@@ -27,6 +40,10 @@ class RawObjectStorageError(RuntimeError):
 
 class RawObjectCollisionError(RawObjectStorageError):
     """A deterministic key already contains different source bytes."""
+
+
+class RawObjectIntegrityError(RawObjectStorageError):
+    """A stored raw object no longer matches its registry metadata."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +134,70 @@ class S3RawDocumentClient:
             reused=False,
         )
 
+    def load(self, document: RawDocumentMetadata, *, max_bytes: int) -> bytes:
+        """Load a bounded raw object and verify its registered identity."""
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        if document.bucket != self._bucket_name:
+            raise RawObjectIntegrityError(
+                "raw registry metadata references an unexpected bucket",
+                code="RAW_BUCKET_MISMATCH",
+                retryable=False,
+            )
+        if document.content_length > max_bytes:
+            raise RawObjectIntegrityError(
+                f"raw object exceeds the {max_bytes}-byte normalization limit",
+                code="RAW_OBJECT_TOO_LARGE",
+                retryable=False,
+            )
+        request: dict[str, object] = {
+            "Bucket": self._bucket_name,
+            "Key": document.key,
+        }
+        if document.version_id is not None:
+            request["VersionId"] = document.version_id
+        try:
+            response = self._api.get_object(**request)
+            response_length = response.get("ContentLength")
+            if response_length != document.content_length:
+                raise RawObjectIntegrityError(
+                    "raw object length does not match registry metadata",
+                    code="RAW_OBJECT_LENGTH_MISMATCH",
+                    retryable=False,
+                )
+            stream = response.get("Body")
+            if not hasattr(stream, "read"):
+                raise RawObjectIntegrityError(
+                    "S3 returned an unreadable raw object body",
+                    code="RAW_OBJECT_BODY_INVALID",
+                    retryable=True,
+                )
+            body = stream.read(max_bytes + 1)
+        except RawObjectStorageError:
+            raise
+        except Exception as error:
+            _raise_s3_error(error, operation="raw object read")
+
+        if not isinstance(body, bytes):
+            raise RawObjectIntegrityError(
+                "S3 returned a non-bytes raw object body",
+                code="RAW_OBJECT_BODY_INVALID",
+                retryable=True,
+            )
+        if len(body) != document.content_length:
+            raise RawObjectIntegrityError(
+                "raw object body length does not match registry metadata",
+                code="RAW_OBJECT_LENGTH_MISMATCH",
+                retryable=False,
+            )
+        if sha256(body).hexdigest() != document.sha256.lower():
+            raise RawObjectIntegrityError(
+                "raw object SHA-256 does not match registry metadata",
+                code="RAW_OBJECT_DIGEST_MISMATCH",
+                retryable=False,
+            )
+        return body
+
     def _reuse_existing(self, request: RawObjectWrite) -> StoredRawObject:
         try:
             response = self._api.head_object(
@@ -150,9 +231,185 @@ class S3RawDocumentClient:
         )
 
 
+class NormalizedObjectStorageError(RuntimeError):
+    """Expected normalized corpus storage failure."""
+
+    def __init__(self, message: str, *, code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
+class NormalizedObjectCollisionError(NormalizedObjectStorageError):
+    """A deterministic corpus key already contains different bytes."""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedCorpusWrite:
+    """Self-contained normalized artifact bytes ready for immutable storage."""
+
+    prefix: str
+    manifest: bytes
+    manifest_sha256: str
+    blocks: bytes
+    blocks_sha256: str
+    filing_key: str
+    parser_version: str
+    source_sha256: str
+
+    def __post_init__(self) -> None:
+        for field in ("prefix", "filing_key", "parser_version"):
+            if not str(getattr(self, field)).strip():
+                raise ValueError(f"{field} must not be empty")
+        if not self.manifest or not self.blocks:
+            raise ValueError("normalized artifact bodies must not be empty")
+        for field in ("manifest_sha256", "blocks_sha256", "source_sha256"):
+            value = str(getattr(self, field))
+            if len(value) != 64:
+                raise ValueError(f"{field} must be a SHA-256 digest")
+            try:
+                bytes.fromhex(value)
+            except ValueError as error:
+                raise ValueError(f"{field} must be a SHA-256 digest") from error
+        if sha256(self.manifest).hexdigest() != self.manifest_sha256.lower():
+            raise ValueError("manifest_sha256 does not match manifest bytes")
+        if sha256(self.blocks).hexdigest() != self.blocks_sha256.lower():
+            raise ValueError("blocks_sha256 does not match block bytes")
+
+
+@dataclass(frozen=True, slots=True)
+class StoredNormalizedCorpus:
+    """Committed normalized artifact keys returned to the registry."""
+
+    bucket: str
+    prefix: str
+    manifest_key: str
+    blocks_key: str
+    reused_manifest: bool
+    reused_blocks: bool
+
+
+class S3NormalizedCorpusClient:
+    """Publish immutable blocks first and the manifest commit marker last."""
+
+    def __init__(self, api: S3Api, *, bucket_name: str) -> None:
+        if not bucket_name.strip():
+            raise ValueError("bucket_name must not be empty")
+        self._api = api
+        self._bucket_name = bucket_name
+
+    def store(self, request: NormalizedCorpusWrite) -> StoredNormalizedCorpus:
+        """Create or verify a complete, deterministic normalized corpus."""
+        blocks_key = f"{request.prefix}/blocks.jsonl.gz"
+        manifest_key = f"{request.prefix}/manifest.json"
+        common_metadata = {
+            "filing-key": request.filing_key,
+            "parser-version": request.parser_version,
+            "source-sha256": request.source_sha256.lower(),
+        }
+        reused_blocks = self._store_immutable(
+            key=blocks_key,
+            body=request.blocks,
+            digest=request.blocks_sha256,
+            content_type="application/x-ndjson",
+            content_encoding="gzip",
+            metadata=common_metadata,
+        )
+        reused_manifest = self._store_immutable(
+            key=manifest_key,
+            body=request.manifest,
+            digest=request.manifest_sha256,
+            content_type="application/json",
+            content_encoding=None,
+            metadata=common_metadata,
+        )
+        return StoredNormalizedCorpus(
+            bucket=self._bucket_name,
+            prefix=request.prefix,
+            manifest_key=manifest_key,
+            blocks_key=blocks_key,
+            reused_manifest=reused_manifest,
+            reused_blocks=reused_blocks,
+        )
+
+    def _store_immutable(
+        self,
+        *,
+        key: str,
+        body: bytes,
+        digest: str,
+        content_type: str,
+        content_encoding: str | None,
+        metadata: dict[str, str],
+    ) -> bool:
+        put: dict[str, object] = {
+            "Bucket": self._bucket_name,
+            "Key": key,
+            "Body": body,
+            "ContentType": content_type,
+            "ChecksumAlgorithm": "SHA256",
+            "ChecksumSHA256": base64.b64encode(bytes.fromhex(digest)).decode("ascii"),
+            "Metadata": {**metadata, "sha256": digest.lower()},
+            "ServerSideEncryption": "AES256",
+            "IfNoneMatch": "*",
+        }
+        if content_encoding is not None:
+            put["ContentEncoding"] = content_encoding
+        try:
+            self._api.put_object(**put)
+            return False
+        except Exception as error:
+            if not _is_precondition_failure(error):
+                _raise_normalized_s3_error(error, operation="corpus object write")
+
+        try:
+            existing = self._api.head_object(Bucket=self._bucket_name, Key=key)
+        except Exception as error:
+            _raise_normalized_s3_error(
+                error,
+                operation="existing corpus object verification",
+            )
+        stored_metadata = existing.get("Metadata")
+        stored_digest = (
+            stored_metadata.get("sha256")
+            if isinstance(stored_metadata, Mapping)
+            else None
+        )
+        if stored_digest != digest.lower() or existing.get("ContentLength") != len(
+            body
+        ):
+            raise NormalizedObjectCollisionError(
+                f"normalized object key {key!r} already contains different bytes",
+                code="NORMALIZED_OBJECT_COLLISION",
+                retryable=False,
+            )
+        return True
+
+
 def _raise_s3_error(error: Exception, *, operation: str) -> NoReturn:
     code, status_code = _aws_error_details(error)
-    retryable = (
+    retryable = _is_retryable_aws_failure(code, status_code)
+    safe_code = code.upper() if code is not None else "SDK_ERROR"
+    raise RawObjectStorageError(
+        f"S3 {operation} failed ({code or 'SDK error'})",
+        code=f"S3_{safe_code}"[:100],
+        retryable=retryable,
+    ) from error
+
+
+def _raise_normalized_s3_error(error: Exception, *, operation: str) -> NoReturn:
+    code, status_code = _aws_error_details(error)
+    retryable = _is_retryable_aws_failure(code, status_code)
+    safe_code = code.upper() if code is not None else "SDK_ERROR"
+    raise NormalizedObjectStorageError(
+        f"S3 {operation} failed ({code or 'SDK error'})",
+        code=f"S3_{safe_code}"[:100],
+        retryable=retryable,
+    ) from error
+
+
+def _is_retryable_aws_failure(code: str | None, status_code: int | None) -> bool:
+    return (
         status_code == 429
         or (status_code is not None and 500 <= status_code < 600)
         or code
@@ -167,12 +424,6 @@ def _raise_s3_error(error: Exception, *, operation: str) -> NoReturn:
         }
         or status_code is None
     )
-    safe_code = code.upper() if code is not None else "SDK_ERROR"
-    raise RawObjectStorageError(
-        f"S3 {operation} failed ({code or 'SDK error'})",
-        code=f"S3_{safe_code}"[:100],
-        retryable=retryable,
-    ) from error
 
 
 def _is_precondition_failure(error: Exception) -> bool:

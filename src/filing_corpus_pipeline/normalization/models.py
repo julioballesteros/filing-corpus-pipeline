@@ -1,9 +1,11 @@
 """Contracts for deterministic raw-filing normalization."""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.registry.models import NormalizedCorpusMetadata
 
 NORMALIZATION_SCHEMA_VERSION = "1"
 SEC_HTML_PARSER_VERSION = "sec-html-v2"
@@ -36,6 +38,65 @@ class QualityStatus(StrEnum):
 
     PASS = "PASS"
     WARN = "WARN"
+
+
+class NormalizationOutcome(StrEnum):
+    """Terminal or duplicate-safe result of one normalization invocation."""
+
+    NORMALIZED = "NORMALIZED"
+    ALREADY_COMPLETED = "ALREADY_COMPLETED"
+    ALREADY_IN_PROGRESS = "ALREADY_IN_PROGRESS"
+    NOT_RETRYABLE = "NOT_RETRYABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizationRequest:
+    """Request to normalize one acquired filing under a bounded lease."""
+
+    filing: FilingReference
+    owner_id: str
+    requested_at: datetime
+    lease_duration: timedelta
+
+    def __post_init__(self) -> None:
+        _require_text(self.owner_id, field="owner_id")
+        if self.requested_at.tzinfo is None or self.requested_at.utcoffset() is None:
+            raise ValueError("requested_at must include a timezone offset")
+        if self.lease_duration <= timedelta(0):
+            raise ValueError("lease_duration must be positive")
+        if self.lease_duration > timedelta(days=1):
+            raise ValueError("lease_duration must not exceed one day")
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizationResult:
+    """Bounded workflow result pointing to committed corpus artifacts."""
+
+    filing_key: str
+    outcome: NormalizationOutcome
+    attempt_count: int
+    corpus: NormalizedCorpusMetadata | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.filing_key, field="filing_key")
+        if self.attempt_count < 1:
+            raise ValueError("attempt_count must be positive")
+        has_corpus = self.outcome in {
+            NormalizationOutcome.NORMALIZED,
+            NormalizationOutcome.ALREADY_COMPLETED,
+        }
+        if has_corpus != (self.corpus is not None):
+            raise ValueError(
+                "corpus metadata is required only for completed normalization"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "filing_key": self.filing_key,
+            "outcome": self.outcome.value,
+            "attempt_count": self.attempt_count,
+            "corpus": self.corpus.to_dict() if self.corpus is not None else None,
+        }
 
 
 @dataclass(frozen=True, slots=True)

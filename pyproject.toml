@@ -58,7 +58,7 @@ known-first-party = ["filing_corpus_pipeline"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 
 [tool.pytest.ini_options]
 addopts = [

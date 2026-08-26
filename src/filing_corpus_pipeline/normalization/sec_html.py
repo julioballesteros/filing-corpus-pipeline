@@ -212,6 +212,11 @@ class SecHtmlNormalizer:
     def __init__(self, config: SecHtmlParserConfig | None = None) -> None:
         self._config = config or SecHtmlParserConfig()
 
+    @property
+    def parser_version(self) -> str:
+        """Return the version used for idempotency and safe reprocessing."""
+        return SEC_HTML_PARSER_VERSION
+
     def normalize(self, source: RawFilingDocument) -> NormalizedDocument:
         """Parse, classify, and validate one raw filing without external I/O."""
         if not source.body:

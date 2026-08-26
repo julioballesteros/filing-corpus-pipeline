@@ -1,8 +1,8 @@
 # Filing registry contract
 
-The filing registry is the idempotency and recovery boundary between discovery
-and acquisition. Discovery is intentionally overlapping, so seeing an existing
-filing is normal rather than exceptional.
+The filing registry is the idempotency and recovery boundary across discovery,
+acquisition, and normalization. Discovery is intentionally overlapping, so
+seeing an existing filing is normal rather than exceptional.
 
 ## Identity and item shape
 
@@ -19,7 +19,9 @@ The first successful claim stores:
 | Claim | `status`, `claim_owner`, `lease_expires_at_epoch`, `attempt_count` |
 | Audit | `first_discovered_at`, `last_claimed_at`, `updated_at`, `schema_version` |
 | Raw object | S3 bucket/key/version, ETag, SHA-256, length, content type and storage timestamp |
-| Failure | bounded error code/message, failure timestamp and `retryable` classification |
+| Normalization claim | owner, lease expiry, parser version, attempt count and last claim time |
+| Corpus | normalized bucket/prefix, manifest and block keys/digests, schema/parser versions, quality status and counts |
+| Failures | separate bounded acquisition and normalization error fields, timestamps and retryability |
 
 Nullable filing metadata uses DynamoDB `NULL` values rather than missing fields,
 making the version-one shape explicit. Claim and failure attributes are removed
@@ -30,18 +32,31 @@ when they no longer describe the current state.
 ```text
 missing ───────────────► FETCHING ───────────────► RAW_STORED
                            │                            │
-                           └────────► FAILED            └─► duplicate: skip
-                                        │
-                                        ├─ retryable ─► FETCHING
-                                        └─ permanent ─► visible, do not retry
+                           └────────► FAILED            ▼
+                                        │          NORMALIZING
+                                        │              │
+                                        │              ├────────► NORMALIZED
+                                        │              └────────► NORMALIZATION_FAILED
+                                        │                              │
+                                        ├─ retryable ─► FETCHING       ├─ retryable ─► NORMALIZING
+                                        └─ permanent: visible          └─ same parser: visible
 
 FETCHING with expired lease ──────────► FETCHING (new owner)
 FETCHING with the same owner ─────────► FETCHING (Step Functions retry)
+NORMALIZING with expired lease ───────► NORMALIZING (new owner)
+NORMALIZING with the same owner ──────► NORMALIZING (Step Functions retry)
+NORMALIZED or normalization failure with a new parser version ─► NORMALIZING
 ```
 
 Only `FETCHING` owned by the caller can transition to `RAW_STORED` or `FAILED`.
 This prevents a slow or retried Lambda invocation from overwriting a newer
 worker's result.
+
+Normalization uses separate owner/lease/attempt/failure attributes, so it does
+not erase acquisition provenance. Only `NORMALIZING` owned by the caller may
+become `NORMALIZED` or `NORMALIZATION_FAILED`. The raw object metadata remains
+available in every post-acquisition state and is the source identity used by
+normalization; Step Functions never needs to carry S3 metadata between tasks.
 
 ## Atomic claim behavior
 
@@ -54,13 +69,20 @@ atomically.
 When the condition fails, a strongly consistent projected read classifies the
 current item as:
 
-- `ALREADY_COMPLETED` for `RAW_STORED`;
+- `ALREADY_COMPLETED` for any post-acquisition state;
 - `ALREADY_IN_PROGRESS` for another active owner; or
 - `NOT_RETRYABLE` for a permanent failure.
 
 The read does not provide the uniqueness guarantee—the preceding conditional
 write does. A short retry handles the narrow race where an item changes between
 the failed condition and classification.
+
+Normalization performs an equivalent conditional claim from `RAW_STORED`, a
+retryable `NORMALIZATION_FAILED`, an expired/same-owner `NORMALIZING`, or an old
+parser version. A same-version `NORMALIZED` item returns its stored corpus
+metadata as `ALREADY_COMPLETED`; a same-version permanent failure remains
+`NOT_RETRYABLE`. This makes overlapping discovery cheap while turning parser
+upgrades into explicit, safe reprocessing.
 
 ## Infrastructure choices
 
@@ -78,7 +100,7 @@ The concrete `registry` service owns state-transition and conflict policy. The
 reads, and SDK error translation. There is no abstract registry service because
 there is only one implementation today.
 
-The acquisition Lambda has only `GetItem` and `UpdateItem` access to this table.
-Step Functions supplies its execution ID as `claim_owner`, so all retries within
-one execution recover the same claim identity while overlapping executions are
-isolated by the lease.
+The acquisition and normalization Lambdas each have only `GetItem` and
+`UpdateItem` access to this table. Step Functions supplies its execution ID as
+the owner, so retries within one execution recover the same claim identity
+while overlapping executions are isolated by the lease.

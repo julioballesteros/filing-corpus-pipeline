@@ -23,6 +23,11 @@ acquisition_map_max_concurrency = 2
 acquisition_lease_seconds       = 300
 acquisition_max_document_bytes  = 26214400
 
+# Normalization runs after acquisition within each Map iteration. Its longer
+# lease covers bounded parsing and it loads no more than acquisition accepts.
+normalization_lease_seconds      = 600
+normalization_max_document_bytes = 26214400
+
 # Leave unset in quota-constrained accounts. Enable only after confirming that
 # the regional Lambda concurrency quota has enough unreserved headroom.
 # discovery_lambda_reserved_concurrency = 1
@@ -34,3 +39,4 @@ registry_deletion_protection_enabled = false
 # Leave false so Terraform refuses to delete a bucket containing any object
 # versions. Set true only for an explicitly disposable environment.
 raw_bucket_force_destroy = false
+normalized_bucket_force_destroy = false
