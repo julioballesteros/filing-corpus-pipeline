@@ -1,44 +1,3 @@
-data "archive_file" "discovery" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../src"
-  output_path = "${path.module}/discovery-lambda.zip"
-
-  excludes = [
-    "**/__pycache__/**",
-    "**/*.pyc",
-    "filing_corpus_pipeline/acquisition/**",
-    "filing_corpus_pipeline/adapters/sec/documents.py",
-    "filing_corpus_pipeline/entrypoints/acquisition_lambda.py",
-    "filing_corpus_pipeline/entrypoints/normalization_lambda.py",
-    "filing_corpus_pipeline/normalization/**",
-    "filing_corpus_pipeline/registry/**",
-    "filing_corpus_pipeline/storage/**",
-  ]
-
-  output_file_mode = "0644"
-}
-
-data "archive_file" "acquisition" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../src"
-  output_path = "${path.module}/acquisition-lambda.zip"
-
-  excludes = [
-    "**/__pycache__/**",
-    "**/*.pyc",
-    "filing_corpus_pipeline/__main__.py",
-    "filing_corpus_pipeline/adapters/sec/discovery.py",
-    "filing_corpus_pipeline/adapters/sec/submissions.py",
-    "filing_corpus_pipeline/discovery/**",
-    "filing_corpus_pipeline/entrypoints/cli.py",
-    "filing_corpus_pipeline/entrypoints/discovery_lambda.py",
-    "filing_corpus_pipeline/entrypoints/normalization_lambda.py",
-    "filing_corpus_pipeline/normalization/**",
-  ]
-
-  output_file_mode = "0644"
-}
-
 resource "aws_cloudwatch_log_group" "discovery_lambda" {
   name              = "/aws/lambda/${local.discovery_lambda_function_name}"
   retention_in_days = var.log_retention_days
@@ -49,8 +8,8 @@ resource "aws_lambda_function" "discovery" {
   description   = "Discovers new SEC 10-K and 10-Q filing references."
   role          = aws_iam_role.discovery_lambda.arn
 
-  filename         = data.archive_file.discovery.output_path
-  source_code_hash = data.archive_file.discovery.output_base64sha256
+  filename         = local.discovery_lambda_package_path
+  source_code_hash = filebase64sha256(local.discovery_lambda_package_path)
   handler          = "filing_corpus_pipeline.entrypoints.discovery_lambda.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]
@@ -91,8 +50,8 @@ resource "aws_lambda_function" "acquisition" {
   description   = "Claims and durably stores one discovered SEC filing."
   role          = aws_iam_role.acquisition_lambda.arn
 
-  filename         = data.archive_file.acquisition.output_path
-  source_code_hash = data.archive_file.acquisition.output_base64sha256
+  filename         = local.acquisition_lambda_package_path
+  source_code_hash = filebase64sha256(local.acquisition_lambda_package_path)
   handler          = "filing_corpus_pipeline.entrypoints.acquisition_lambda.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]

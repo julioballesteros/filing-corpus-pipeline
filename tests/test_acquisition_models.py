@@ -1,6 +1,5 @@
 """Tests for provider-neutral acquisition values."""
 
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -13,7 +12,7 @@ from filing_corpus_pipeline.acquisition import (
     RetrievedDocument,
     raw_document_key,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 
 
@@ -22,7 +21,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="provider/one",
         provider_filing_id="filing #1",
-        issuer=IssuerReference("provider/one", "issuer/1"),
+        provider_issuer_id="issuer/1",
         issuer_name="Issuer",
         form=FilingForm.TEN_K,
         filed_on=date(2025, 1, 1),
@@ -36,7 +35,13 @@ def filing_reference() -> FilingReference:
 
 def document_metadata() -> RawDocumentMetadata:
     """Build metadata used by a successful result."""
-    return RawDocumentMetadata("bucket", "key", "a" * 64, 10, "text/html")
+    return RawDocumentMetadata(
+        bucket="bucket",
+        key="key",
+        sha256="a" * 64,
+        content_length=10,
+        content_type="text/html",
+    )
 
 
 def test_raw_document_key_escapes_each_identity_segment() -> None:
@@ -48,7 +53,7 @@ def test_raw_document_key_escapes_each_identity_segment() -> None:
 
 def test_raw_document_key_rejects_s3_keys_over_the_limit() -> None:
     """Unexpectedly large provider IDs fail before an S3 call."""
-    filing = replace(filing_reference(), primary_document="x" * 1020)
+    filing = filing_reference().model_copy(update={"primary_document": "x" * 1020})
 
     with pytest.raises(ValueError, match="key size"):
         raw_document_key(filing)
@@ -82,22 +87,26 @@ def test_acquisition_request_rejects_invalid_claim_values(
 def test_retrieved_document_requires_response_metadata() -> None:
     """A provider result must identify its content type and source URL."""
     with pytest.raises(ValueError):
-        RetrievedDocument(b"body", "", "https://example.test")
+        RetrievedDocument(
+            body=b"body",
+            content_type="",
+            source_url="https://example.test",
+        )
     with pytest.raises(ValueError):
-        RetrievedDocument(b"body", "text/html", "")
+        RetrievedDocument(body=b"body", content_type="text/html", source_url="")
 
 
 def test_acquisition_result_enforces_document_invariant() -> None:
     """Only RAW_STORED results may carry durable object metadata."""
     stored = AcquisitionResult(
-        "sec#filing",
-        AcquisitionOutcome.RAW_STORED,
-        1,
-        document_metadata(),
+        filing_key="sec#filing",
+        outcome=AcquisitionOutcome.RAW_STORED,
+        attempt_count=1,
+        document=document_metadata(),
     )
 
     assert stored.document is not None
-    assert stored.to_dict() == {
+    assert stored.model_dump(mode="json") == {
         "filing_key": "sec#filing",
         "outcome": "RAW_STORED",
         "attempt_count": 1,
@@ -112,25 +121,37 @@ def test_acquisition_result_enforces_document_invariant() -> None:
         },
     }
     with pytest.raises(ValueError, match="required only"):
-        AcquisitionResult("sec#filing", AcquisitionOutcome.RAW_STORED, 1)
+        AcquisitionResult(
+            filing_key="sec#filing",
+            outcome=AcquisitionOutcome.RAW_STORED,
+            attempt_count=1,
+        )
     with pytest.raises(ValueError, match="required only"):
         AcquisitionResult(
-            "sec#filing",
-            AcquisitionOutcome.ALREADY_COMPLETED,
-            1,
-            document_metadata(),
+            filing_key="sec#filing",
+            outcome=AcquisitionOutcome.ALREADY_COMPLETED,
+            attempt_count=1,
+            document=document_metadata(),
         )
     with pytest.raises(ValueError):
-        AcquisitionResult("", AcquisitionOutcome.ALREADY_COMPLETED, 1)
+        AcquisitionResult(
+            filing_key="",
+            outcome=AcquisitionOutcome.ALREADY_COMPLETED,
+            attempt_count=1,
+        )
     with pytest.raises(ValueError):
-        AcquisitionResult("sec#filing", AcquisitionOutcome.ALREADY_COMPLETED, 0)
+        AcquisitionResult(
+            filing_key="sec#filing",
+            outcome=AcquisitionOutcome.ALREADY_COMPLETED,
+            attempt_count=0,
+        )
 
     duplicate = AcquisitionResult(
-        "sec#filing",
-        AcquisitionOutcome.ALREADY_COMPLETED,
-        1,
+        filing_key="sec#filing",
+        outcome=AcquisitionOutcome.ALREADY_COMPLETED,
+        attempt_count=1,
     )
-    assert duplicate.to_dict()["document"] is None
+    assert duplicate.model_dump(mode="json")["document"] is None
 
 
 @pytest.mark.parametrize(

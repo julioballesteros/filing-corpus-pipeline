@@ -13,6 +13,7 @@ from filing_corpus_pipeline.domain import FilingForm
 from filing_corpus_pipeline.normalization.models import (
     NORMALIZATION_SCHEMA_VERSION,
     SEC_HTML_PARSER_VERSION,
+    BlockSection,
     BlockType,
     DocumentBlock,
     DocumentParseError,
@@ -420,8 +421,8 @@ class SecHtmlNormalizer:
                 if occurrence > 1:
                     warnings.append(
                         ParseWarning(
-                            "DUPLICATE_ITEM_HEADING",
-                            f"encountered {base_id} more than once",
+                            code="DUPLICATE_ITEM_HEADING",
+                            message=f"encountered {base_id} more than once",
                         )
                     )
                 current = _SectionContext(
@@ -441,11 +442,13 @@ class SecHtmlNormalizer:
                     block_type=block_type,
                     text=value.text,
                     content_sha256=digest,
-                    section_id=current.section_id,
-                    part=current.part,
-                    item=current.item,
-                    canonical_section=current.canonical_name,
-                    section_heading=current.heading,
+                    section=BlockSection(
+                        id=current.section_id,
+                        part=current.part,
+                        item=current.item,
+                        canonical_name=current.canonical_name,
+                        heading=current.heading,
+                    ),
                     table_rows=value.table_rows,
                 )
             )
@@ -479,8 +482,8 @@ class SecHtmlNormalizer:
         if text_length < self._config.short_document_chars:
             warnings.append(
                 ParseWarning(
-                    "SHORT_DOCUMENT",
-                    (
+                    code="SHORT_DOCUMENT",
+                    message=(
                         f"normalized content has {text_length} characters; "
                         f"expected at least {self._config.short_document_chars}"
                     ),
@@ -493,15 +496,17 @@ class SecHtmlNormalizer:
         if not item_sections:
             warnings.append(
                 ParseWarning(
-                    "NO_ITEM_SECTIONS",
-                    "no SEC Item headings were identified",
+                    code="NO_ITEM_SECTIONS",
+                    message="no SEC Item headings were identified",
                 )
             )
         for missing in sorted(_EXPECTED_SECTIONS[form] - item_sections):
             warnings.append(
                 ParseWarning(
-                    "MISSING_EXPECTED_SECTION",
-                    f"expected {form.value} section was not identified: {missing}",
+                    code="MISSING_EXPECTED_SECTION",
+                    message=(
+                        f"expected {form.value} section was not identified: {missing}"
+                    ),
                 )
             )
         return warnings

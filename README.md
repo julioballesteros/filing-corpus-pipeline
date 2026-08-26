@@ -56,6 +56,11 @@ contact address and do not commit it to the repository.
 Acquisition and normalization consume `FilingReference` records without
 depending on SEC metadata response formats.
 
+Contracts that cross a Lambda, Step Functions, parser, or persistence boundary
+are immutable Pydantic models with forbidden extra fields and JSON-native
+serialization. Small implementation-only records and configuration objects
+remain frozen dataclasses; they do not need runtime schema machinery.
+
 ## Lambda discovery contract
 
 Configure the Lambda handler as:
@@ -159,11 +164,12 @@ EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
 ```
 
 Step Functions owns the execution history, per-filing concurrency, and retry
-policy. Discovery and acquisition use small dependency-free source ZIPs. The
-normalization ZIP is built reproducibly for Python 3.13 on Lambda arm64 and
-contains the pinned Linux `lxml` wheel. All three functions have explicit
-handlers, resource bounds, JSON logs, retained CloudWatch log groups, and X-Ray
-tracing.
+policy. All three deployment ZIPs are built reproducibly for Python 3.13 on
+Lambda arm64 and contain the Pydantic runtime pinned by `uv.lock`;
+normalization additionally contains the pinned Linux `lxml` wheel. Each ZIP is
+limited to the application modules required by its handler. All three functions
+have explicit handlers, resource bounds, JSON logs, retained CloudWatch log
+groups, and X-Ray tracing.
 EventBridge sends the scheduled timestamp plus the configured watchlist and
 lookback window. Reserved concurrency is available as an opt-in control for AWS
 accounts with sufficient regional quota.
@@ -243,7 +249,7 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 terraform fmt -check -recursive infra/terraform
-uv run python scripts/build_normalization_lambda.py
+uv run python scripts/build_lambda_packages.py
 terraform -chdir=infra/terraform init -backend=false
 terraform -chdir=infra/terraform validate
 terraform -chdir=infra/terraform test
@@ -251,8 +257,8 @@ terraform -chdir=infra/terraform test
 
 The same commands are available through `make format`, `make lint`,
 `make typecheck`, `make test`, `make infra-validate`, `make infra-test`, and
-`make check`. Infrastructure validation and tests build the normalization ZIP
-automatically.
+`make check`. Infrastructure validation and tests build all three Lambda ZIPs
+automatically from versions pinned in `uv.lock`.
 
 
 GitHub Actions runs the Python quality suite and credential-free Terraform plan

@@ -5,10 +5,13 @@ import os
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 
+from pydantic import ValidationError
+
 from filing_corpus_pipeline.discovery import DiscoveryRequest
 from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
 from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
+from filing_corpus_pipeline.models import validation_error_message
 
 LOGGER = logging.getLogger(__name__)
 SUPPORTED_PROVIDER = "sec"
@@ -38,7 +41,7 @@ def handler(
             "filings_found": len(result.filings),
         },
     )
-    return result.to_dict()
+    return result.model_dump(mode="json")
 
 
 def parse_discovery_event(event: object) -> DiscoveryRequest:
@@ -78,8 +81,8 @@ def parse_discovery_event(event: object) -> DiscoveryRequest:
             filed_from=filed_from,
             filed_to=filed_to,
         )
-    except ValueError as error:
-        raise InvalidDiscoveryEvent(str(error)) from error
+    except ValidationError as error:
+        raise InvalidDiscoveryEvent(validation_error_message(error)) from error
 
 
 def _mapping(value: object, *, field: str) -> Mapping[str, object]:

@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -122,7 +122,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -300,11 +300,11 @@ def raw_stored_request() -> MarkRawStoredRequest:
         owner_id="execution-1",
         stored_at=datetime(2025, 8, 1, tzinfo=UTC),
         document=RawDocumentMetadata(
-            "bucket",
-            "raw/filing.htm",
-            "a" * 64,
-            10,
-            "text/html",
+            bucket="bucket",
+            key="raw/filing.htm",
+            sha256="a" * 64,
+            content_length=10,
+            content_type="text/html",
         ),
     )
 
@@ -315,7 +315,7 @@ def failed_request() -> MarkFailedRequest:
         filing_key="sec#filing",
         owner_id="execution-1",
         failed_at=datetime(2025, 8, 1, tzinfo=UTC),
-        failure=FailureDetails("ERROR", "failed", True),
+        failure=FailureDetails(code="ERROR", message="failed", retryable=True),
     )
 
 
@@ -491,14 +491,21 @@ def test_new_parser_version_reclaims_a_previous_normalized_item() -> None:
 def test_normalization_terminal_transitions_delegate_and_protect_the_lease() -> None:
     corpus = normalized_corpus()
     normalized = MarkNormalizedRequest(
-        "sec#filing", "execution-1", datetime.now(UTC), corpus
+        filing_key="sec#filing",
+        owner_id="execution-1",
+        normalized_at=datetime.now(UTC),
+        corpus=corpus,
     )
     failed = MarkNormalizationFailedRequest(
-        "sec#filing",
-        "execution-1",
-        datetime.now(UTC),
-        "sec-html-v2",
-        FailureDetails("PARSE", "bad filing", False),
+        filing_key="sec#filing",
+        owner_id="execution-1",
+        failed_at=datetime.now(UTC),
+        parser_version="sec-html-v2",
+        failure=FailureDetails(
+            code="PARSE",
+            message="bad filing",
+            retryable=False,
+        ),
     )
     client = StubRegistryClient()
     registry = service(client)

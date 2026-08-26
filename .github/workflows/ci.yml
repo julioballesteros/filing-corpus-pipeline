@@ -63,8 +63,8 @@ jobs:
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive infra/terraform
 
-      - name: Build normalization Lambda package
-        run: uv run python scripts/build_normalization_lambda.py
+      - name: Build Lambda packages
+        run: uv run python scripts/build_lambda_packages.py
 
       - name: Initialize Terraform providers
         run: terraform -chdir=infra/terraform init -backend=false -input=false

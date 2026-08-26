@@ -5,6 +5,8 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
+from pydantic import ValidationError
+
 from filing_corpus_pipeline.acquisition import (
     AcquisitionError,
     AcquisitionRequest,
@@ -14,6 +16,7 @@ from filing_corpus_pipeline.acquisition.composition import (
 )
 from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
+from filing_corpus_pipeline.models import validation_error_message
 
 LOGGER = logging.getLogger(__name__)
 MAX_LEASE_SECONDS = 24 * 60 * 60
@@ -72,7 +75,7 @@ def handler(event: object, context: object) -> dict[str, object]:
             "attempt_count": result.attempt_count,
         },
     )
-    return result.to_dict()
+    return result.model_dump(mode="json")
 
 
 def parse_acquisition_event(
@@ -85,9 +88,9 @@ def parse_acquisition_event(
     if "filing" not in payload:
         raise InvalidAcquisitionEvent("missing required field: filing")
     try:
-        filing = FilingReference.from_dict(payload["filing"])
-    except ValueError as error:
-        raise InvalidAcquisitionEvent(str(error)) from error
+        filing = FilingReference.model_validate(payload["filing"])
+    except ValidationError as error:
+        raise InvalidAcquisitionEvent(validation_error_message(error)) from error
     owner_id = _required_string(payload, "owner_id")
     requested_at = _required_datetime(payload, "requested_at")
     try:
@@ -97,8 +100,8 @@ def parse_acquisition_event(
             requested_at=requested_at,
             lease_duration=lease_duration,
         )
-    except ValueError as error:
-        raise InvalidAcquisitionEvent(str(error)) from error
+    except ValidationError as error:
+        raise InvalidAcquisitionEvent(validation_error_message(error)) from error
 
 
 def _mapping(event: object) -> Mapping[str, object]:

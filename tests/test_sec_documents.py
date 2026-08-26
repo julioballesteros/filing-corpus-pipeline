@@ -1,6 +1,5 @@
 """Tests for SEC primary-document acquisition."""
 
-from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -11,7 +10,7 @@ from filing_corpus_pipeline.adapters.sec.documents import (
     SecDocumentConfig,
     SecFilingDocumentSource,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 
 
 class StubBytesTransport:
@@ -47,7 +46,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -109,21 +108,22 @@ def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
     ("filing", "code"),
     [
         (
-            replace(filing_reference(), primary_document_url="https://evil.test/x"),
+            filing_reference().model_copy(
+                update={"primary_document_url": "https://evil.test/x"}
+            ),
             "SEC_DOCUMENT_URL_MISMATCH",
         ),
         (
-            replace(filing_reference(), provider_filing_id="invalid"),
+            filing_reference().model_copy(update={"provider_filing_id": "invalid"}),
             "SEC_INVALID_ACCESSION",
         ),
         (
-            replace(filing_reference(), primary_document="../report.htm"),
+            filing_reference().model_copy(update={"primary_document": "../report.htm"}),
             "SEC_INVALID_DOCUMENT_NAME",
         ),
         (
-            replace(
-                filing_reference(),
-                issuer=IssuerReference("sec", "not-a-cik"),
+            filing_reference().model_copy(
+                update={"provider_issuer_id": "not-a-cik"},
             ),
             "SEC_INVALID_CIK",
         ),
@@ -146,11 +146,7 @@ def test_sec_source_rejects_inconsistent_identity_before_http(
 
 def test_sec_source_rejects_a_different_provider() -> None:
     """The SEC adapter never consumes another provider's record."""
-    other = replace(
-        filing_reference(),
-        provider="other",
-        issuer=IssuerReference("other", "0000320193"),
-    )
+    other = filing_reference().model_copy(update={"provider": "other"})
     adapter, _ = source(HttpBytesResponse(b"body", "text/html", None, None))
 
     with pytest.raises(DocumentRetrievalError) as raised:

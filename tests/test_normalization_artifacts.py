@@ -2,13 +2,12 @@
 
 import gzip
 import json
-from dataclasses import replace
 from datetime import date
 from hashlib import sha256
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.normalization import (
     BLOCKS_FILENAME,
     NormalizedDocument,
@@ -24,7 +23,7 @@ def _document() -> NormalizedDocument:
     filing = FilingReference(
         provider="provider/one",
         provider_filing_id="filing #1",
-        issuer=IssuerReference("provider/one", "issuer/1"),
+        provider_issuer_id="issuer/1",
         issuer_name="Example Issuer",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 4, 30),
@@ -41,7 +40,12 @@ def _document() -> NormalizedDocument:
         <h3>ITEM 2. MANAGEMENT'S DISCUSSION AND ANALYSIS</h3><p>Demand improved.</p>
     """
     return SecHtmlNormalizer(SecHtmlParserConfig(short_document_chars=1)).normalize(
-        RawFilingDocument("provider/one#filing #1", filing, body, "text/html")
+        RawFilingDocument(
+            filing_key="provider/one#filing #1",
+            filing=filing,
+            body=body,
+            content_type="text/html",
+        )
     )
 
 
@@ -87,10 +91,11 @@ def test_normalized_prefix_escapes_identity_segments() -> None:
 
 def test_normalized_prefix_rejects_keys_over_s3_limit() -> None:
     document = _document()
-    oversized_filing = replace(
-        document.filing,
-        provider_filing_id="x" * 1_000,
+    oversized_filing = document.filing.model_copy(
+        update={"provider_filing_id": "x" * 1_000}
     )
 
     with pytest.raises(ValueError, match="key size"):
-        normalized_document_prefix(replace(document, filing=oversized_filing))
+        normalized_document_prefix(
+            document.model_copy(update={"filing": oversized_filing})
+        )

@@ -165,9 +165,9 @@ company filing fixture or couple its tests to a mutable upstream document.
 
 Terraform deploys the normalization Lambda, its private versioned corpus
 bucket, least-privilege registry/raw/corpus permissions, retained JSON logs,
-X-Ray tracing, and the acquisition-to-normalization workflow route. The Lambda
-ZIP is built from the locked Python 3.13 Linux arm64 `lxml` wheel rather than
-assuming a developer workstation binary will run in AWS.
+X-Ray tracing, and the acquisition-to-normalization workflow route. Its Lambda
+ZIP is built from the locked Python 3.13 Linux arm64 Pydantic and `lxml` wheels
+rather than assuming developer-workstation binaries will run in AWS.
 
 Still outside this ingestion project are semantic XBRL facts, narrative
 expectation extraction, consumer-specific chunking, embeddings, a vector/RAG

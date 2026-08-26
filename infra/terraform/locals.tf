@@ -20,8 +20,15 @@ locals {
     data.aws_caller_identity.current.account_id,
     substr(sha256("${local.name_prefix}:${var.aws_region}:normalized"), 0, 10),
   )
-  normalization_lambda_package_path = abspath(
-    "${path.module}/../../build/lambda/normalization-lambda.zip"
+  lambda_package_directory = abspath("${path.module}/../../build/lambda")
+  discovery_lambda_package_path = (
+    "${local.lambda_package_directory}/discovery-lambda.zip"
+  )
+  acquisition_lambda_package_path = (
+    "${local.lambda_package_directory}/acquisition-lambda.zip"
+  )
+  normalization_lambda_package_path = (
+    "${local.lambda_package_directory}/normalization-lambda.zip"
   )
 
   common_tags = {

@@ -30,7 +30,7 @@ test:
 	uv run pytest
 
 lambda-package:
-	uv run python scripts/build_normalization_lambda.py
+	uv run python scripts/build_lambda_packages.py
 
 infra-format:
 	terraform fmt -recursive infra/terraform

@@ -1,11 +1,10 @@
 """Tests for provider-neutral filing registry values."""
 
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -24,7 +23,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -82,8 +81,8 @@ def test_claim_request_derives_key_and_utc_lease_expiry() -> None:
     [
         ({"owner_id": ""}, "owner_id"),
         ({"claimed_at": datetime(2025, 1, 1)}, "timezone"),
-        ({"lease_duration": timedelta(0)}, "positive"),
-        ({"lease_duration": timedelta(days=2)}, "one day"),
+        ({"lease_duration": timedelta(0)}, "lease_duration"),
+        ({"lease_duration": timedelta(days=2)}, "lease_duration"),
     ],
 )
 def test_claim_request_rejects_unsafe_lease_values(
@@ -112,11 +111,12 @@ def test_claim_result_reports_ownership() -> None:
         attempt_count=1,
         owner_id="execution-1",
     )
-    duplicate = replace(
-        claimed,
-        outcome=ClaimOutcome.ALREADY_COMPLETED,
-        status=RegistryStatus.RAW_STORED,
-        owner_id=None,
+    duplicate = claimed.model_copy(
+        update={
+            "outcome": ClaimOutcome.ALREADY_COMPLETED,
+            "status": RegistryStatus.RAW_STORED,
+            "owner_id": None,
+        },
     )
 
     assert claimed.acquired is True
@@ -167,7 +167,11 @@ def test_transition_requests_require_aware_timestamps() -> None:
             filing_key="sec#filing",
             owner_id="execution-1",
             failed_at=datetime(2025, 1, 1),
-            failure=FailureDetails("HTTP_ERROR", "request failed", True),
+            failure=FailureDetails(
+                code="HTTP_ERROR",
+                message="request failed",
+                retryable=True,
+            ),
         )
 
 
@@ -178,4 +182,4 @@ def test_transition_requests_require_aware_timestamps() -> None:
 def test_failure_details_are_bounded(code: str, message: str) -> None:
     """Unbounded provider errors cannot consume an entire DynamoDB item."""
     with pytest.raises(ValueError):
-        FailureDetails(code, message, True)
+        FailureDetails(code=code, message=message, retryable=True)

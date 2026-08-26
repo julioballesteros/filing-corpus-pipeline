@@ -3,7 +3,7 @@
 from filing_corpus_pipeline.adapters.sec.constants import SEC_ARCHIVE_BASE_URL
 from filing_corpus_pipeline.adapters.sec.submissions import SecSubmissionsClient
 from filing_corpus_pipeline.discovery import DiscoveryRequest
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 
 
 class SecFilingDiscoverySource:
@@ -33,10 +33,6 @@ class SecFilingDiscoverySource:
                 ):
                     continue
 
-                issuer = IssuerReference(
-                    provider=self.provider,
-                    provider_issuer_id=submission.cik,
-                )
                 accession_path = submission.accession_number.replace("-", "")
                 archive_cik = str(int(submission.cik))
                 directory_url = f"{SEC_ARCHIVE_BASE_URL}/{archive_cik}/{accession_path}"
@@ -44,7 +40,7 @@ class SecFilingDiscoverySource:
                     FilingReference(
                         provider=self.provider,
                         provider_filing_id=submission.accession_number,
-                        issuer=issuer,
+                        provider_issuer_id=submission.cik,
                         issuer_name=submission.issuer_name,
                         form=form,
                         filed_on=submission.filed_on,

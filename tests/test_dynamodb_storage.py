@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimRequest,
     FailureDetails,
@@ -68,7 +68,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -387,7 +387,11 @@ def test_mark_normalization_failed_uses_separate_diagnostics() -> None:
         owner_id="execution-1",
         failed_at=datetime(2025, 8, 1, 18, 2, tzinfo=UTC),
         parser_version="sec-html-v2",
-        failure=FailureDetails("NO_CONTENT", "no visible content", False),
+        failure=FailureDetails(
+            code="NO_CONTENT",
+            message="no visible content",
+            retryable=False,
+        ),
     )
 
     storage(api).mark_normalization_failed(request)

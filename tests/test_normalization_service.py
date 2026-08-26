@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.normalization import (
     NormalizationOutcome,
     NormalizationRequest,
@@ -46,7 +46,7 @@ def filing() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),

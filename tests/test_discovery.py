@@ -1,6 +1,5 @@
 """Tests for provider-independent discovery behaviour."""
 
-from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -33,11 +32,10 @@ def filing_reference(
     issuer_name: str = "Example Corp",
 ) -> FilingReference:
     """Build a valid filing reference with concise defaults."""
-    issuer = IssuerReference(provider="sec", provider_issuer_id="0000320193")
     return FilingReference(
         provider="sec",
         provider_filing_id=accession,
-        issuer=issuer,
+        provider_issuer_id="0000320193",
         issuer_name=issuer_name,
         form=FilingForm.TEN_K,
         filed_on=filed_on,
@@ -70,8 +68,9 @@ def test_service_deduplicates_and_sorts_filing_references() -> None:
 
     assert result.filings == (earlier, later)
     assert result.issuers_scanned == 1
-    assert result.to_dict()["filings_found"] == 2
-    assert result.to_dict()["filings"][0] == earlier.to_dict()  # type: ignore[index]
+    payload = result.model_dump(mode="json")
+    assert payload["filings_found"] == 2
+    assert payload["filings"][0] == earlier.model_dump(mode="json")
 
 
 def test_service_rejects_conflicting_duplicate_references() -> None:
@@ -97,8 +96,8 @@ def test_service_rejects_issuer_from_another_provider() -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"issuers": ()}, "at least one issuer"),
-        ({"forms": frozenset()}, "at least one filing form"),
+        ({"issuers": ()}, "issuers"),
+        ({"forms": frozenset()}, "forms"),
         (
             {"filed_from": date(2026, 1, 2), "filed_to": date(2026, 1, 1)},
             "filed_from",
@@ -111,7 +110,7 @@ def test_discovery_request_validates_its_bounds(
 ) -> None:
     """Invalid workflow input fails before any provider request is made."""
     values: dict[str, object] = {
-        "issuers": (IssuerReference("sec", "320193"),),
+        "issuers": (IssuerReference(provider="sec", provider_issuer_id="320193"),),
         "forms": frozenset(FilingForm),
         "filed_from": date(2024, 1, 1),
         "filed_to": date(2026, 1, 1),
@@ -132,38 +131,51 @@ def test_issuer_reference_requires_nonempty_identity(
 ) -> None:
     """Empty provider identities cannot become idempotency keys."""
     with pytest.raises(ValueError):
-        IssuerReference(provider, provider_issuer_id)
+        IssuerReference(provider=provider, provider_issuer_id=provider_issuer_id)
 
 
-def test_filing_reference_requires_matching_provider() -> None:
-    """A filing cannot be associated with an issuer from another namespace."""
+def test_filing_reference_derives_matching_issuer_identity() -> None:
+    """The issuer view cannot diverge from the filing provider namespace."""
     valid = filing_reference("0000320193-25-000001")
 
-    with pytest.raises(ValueError, match="providers must match"):
-        replace(
-            valid,
-            issuer=IssuerReference("other", "issuer-1"),
-        )
+    assert valid.issuer == IssuerReference(
+        provider="sec",
+        provider_issuer_id="0000320193",
+    )
 
 
 def test_filing_reference_round_trips_its_workflow_contract() -> None:
     """Acquisition reconstructs the exact provider-neutral discovery record."""
     filing = filing_reference("0000320193-25-000001")
 
-    assert FilingReference.from_dict(filing.to_dict()) == filing
+    payload = filing.model_dump(mode="json")
+
+    assert FilingReference.model_validate(payload) == filing
+
+
+def test_filing_reference_contract_is_frozen_and_rejects_unknown_fields() -> None:
+    """Boundary records cannot drift or mutate after validation."""
+    filing = filing_reference("0000320193-25-000001")
+    payload = filing.model_dump(mode="json")
+    payload["unexpected"] = "schema drift"
+
+    with pytest.raises(ValueError, match="unexpected"):
+        FilingReference.model_validate(payload)
+    with pytest.raises(ValueError, match="frozen"):
+        filing.issuer_name = "Changed"
 
 
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"filed_on": "bad-date"}, "filed_on must be an ISO date"),
-        ({"report_date": 1}, "report_date must be an ISO date or null"),
-        ({"report_date": "bad"}, "report_date must be an ISO date or null"),
-        ({"accepted_at": 1}, "accepted_at must be an ISO timestamp or null"),
-        ({"accepted_at": "bad"}, "accepted_at must be an ISO timestamp or null"),
+        ({"filed_on": "bad-date"}, "filed_on"),
+        ({"report_date": 1}, "report_date"),
+        ({"report_date": "bad"}, "report_date"),
+        ({"accepted_at": 1}, "accepted_at"),
+        ({"accepted_at": "bad"}, "accepted_at"),
         (
             {"accepted_at": "2025-01-01T12:00:00"},
-            "accepted_at must include a timezone offset",
+            "accepted_at",
         ),
     ],
 )
@@ -172,8 +184,10 @@ def test_filing_reference_parser_rejects_invalid_temporal_fields(
     message: str,
 ) -> None:
     """Schema drift in a workflow record is rejected at the handoff boundary."""
-    payload: dict[str, object] = {**filing_reference("0000320193-25-000001").to_dict()}
+    payload: dict[str, object] = {
+        **filing_reference("0000320193-25-000001").model_dump(mode="json")
+    }
     payload.update(overrides)
 
     with pytest.raises(ValueError, match=message):
-        FilingReference.from_dict(payload)
+        FilingReference.model_validate(payload)

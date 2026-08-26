@@ -1,6 +1,5 @@
 """Tests for acquisition orchestration independent of AWS SDK syntax."""
 
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from typing import cast
@@ -17,7 +16,7 @@ from filing_corpus_pipeline.acquisition import (
     RetrievedDocument,
     RetryableAcquisitionError,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -100,7 +99,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -162,9 +161,9 @@ def successful_dependencies() -> (
         StubRegistryService(claim_result()),
         StubDocumentSource(
             RetrievedDocument(
-                b"<html>filing</html>",
-                "text/html",
-                "https://www.sec.gov/report.htm",
+                body=b"<html>filing</html>",
+                content_type="text/html",
+                source_url="https://www.sec.gov/report.htm",
                 source_etag='"source"',
             )
         ),
@@ -283,7 +282,11 @@ def test_acquire_rejects_empty_provider_bytes_as_permanent() -> None:
     """Even a malformed provider implementation cannot store an empty object."""
     registry, _, storage = successful_dependencies()
     source = StubDocumentSource(
-        RetrievedDocument(b"", "text/html", "https://www.sec.gov/report.htm")
+        RetrievedDocument(
+            body=b"",
+            content_type="text/html",
+            source_url="https://www.sec.gov/report.htm",
+        )
     )
 
     with pytest.raises(PermanentAcquisitionError) as raised:
@@ -296,9 +299,12 @@ def test_acquire_rejects_empty_provider_bytes_as_permanent() -> None:
 def test_acquire_records_an_object_key_over_the_s3_limit() -> None:
     """Oversized provider identity cannot strand a claimed filing."""
     registry, source, storage = successful_dependencies()
-    oversized_request = replace(
-        request(),
-        filing=replace(filing_reference(), primary_document="x" * 1020),
+    oversized_request = request().model_copy(
+        update={
+            "filing": filing_reference().model_copy(
+                update={"primary_document": "x" * 1020}
+            )
+        },
     )
 
     with pytest.raises(PermanentAcquisitionError) as raised:

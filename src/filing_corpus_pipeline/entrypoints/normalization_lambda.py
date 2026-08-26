@@ -5,8 +5,11 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
+from pydantic import ValidationError
+
 from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
+from filing_corpus_pipeline.models import validation_error_message
 from filing_corpus_pipeline.normalization import (
     NormalizationError,
     NormalizationRequest,
@@ -78,7 +81,7 @@ def handler(event: object, context: object) -> dict[str, object]:
             ),
         },
     )
-    return result.to_dict()
+    return result.model_dump(mode="json")
 
 
 def parse_normalization_event(
@@ -91,9 +94,9 @@ def parse_normalization_event(
     if "filing" not in payload:
         raise InvalidNormalizationEvent("missing required field: filing")
     try:
-        filing = FilingReference.from_dict(payload["filing"])
-    except ValueError as error:
-        raise InvalidNormalizationEvent(str(error)) from error
+        filing = FilingReference.model_validate(payload["filing"])
+    except ValidationError as error:
+        raise InvalidNormalizationEvent(validation_error_message(error)) from error
     try:
         return NormalizationRequest(
             filing=filing,
@@ -101,8 +104,8 @@ def parse_normalization_event(
             requested_at=_required_datetime(payload, "requested_at"),
             lease_duration=lease_duration,
         )
-    except ValueError as error:
-        raise InvalidNormalizationEvent(str(error)) from error
+    except ValidationError as error:
+        raise InvalidNormalizationEvent(validation_error_message(error)) from error
 
 
 def _mapping(event: object) -> Mapping[str, object]:

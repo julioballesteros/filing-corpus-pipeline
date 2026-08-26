@@ -1,13 +1,13 @@
 """Tests for provider-neutral normalized-corpus contracts."""
 
-from dataclasses import replace
 from datetime import date
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.normalization import (
     SEC_HTML_PARSER_VERSION,
+    BlockSection,
     BlockType,
     DocumentBlock,
     DocumentParseError,
@@ -24,7 +24,7 @@ def _filing() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000000000-25-000001",
-        issuer=IssuerReference("sec", "0000000000"),
+        provider_issuer_id="0000000000",
         issuer_name="Example Issuer",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 4, 30),
@@ -43,11 +43,13 @@ def _block(**overrides: object) -> DocumentBlock:
         "block_type": BlockType.PARAGRAPH,
         "text": "Visible filing content.",
         "content_sha256": "a" * 64,
-        "section_id": "preamble",
-        "part": None,
-        "item": None,
-        "canonical_section": "preamble",
-        "section_heading": "Preamble",
+        "section": BlockSection(
+            id="preamble",
+            part=None,
+            item=None,
+            canonical_name="preamble",
+            heading="Preamble",
+        ),
     }
     values.update(overrides)
     return DocumentBlock(**values)  # type: ignore[arg-type]
@@ -92,7 +94,7 @@ def test_block_and_section_have_json_compatible_contracts() -> None:
         table_rows=(("Metric", "Value"),),
     )
 
-    assert block.to_dict() == {
+    assert block.model_dump(mode="json", by_alias=True) == {
         "block_id": "block-00000-aaaaaaaaaaaa",
         "ordinal": 0,
         "type": "table",
@@ -107,7 +109,7 @@ def test_block_and_section_have_json_compatible_contracts() -> None:
         },
         "table_rows": [["Metric", "Value"]],
     }
-    assert _section().to_dict()["block_count"] == 1
+    assert _section().model_dump(mode="json", by_alias=True)["block_count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -117,9 +119,33 @@ def test_block_and_section_have_json_compatible_contracts() -> None:
         {"ordinal": -1},
         {"text": ""},
         {"content_sha256": "invalid"},
-        {"section_id": ""},
-        {"canonical_section": ""},
-        {"section_heading": ""},
+        {
+            "section": {
+                "id": "",
+                "part": None,
+                "item": None,
+                "canonical_name": "preamble",
+                "heading": "Preamble",
+            }
+        },
+        {
+            "section": {
+                "id": "preamble",
+                "part": None,
+                "item": None,
+                "canonical_name": "",
+                "heading": "Preamble",
+            }
+        },
+        {
+            "section": {
+                "id": "preamble",
+                "part": None,
+                "item": None,
+                "canonical_name": "preamble",
+                "heading": "",
+            }
+        },
         {"block_type": BlockType.TABLE},
         {"table_rows": (("unexpected",),)},
         {"block_type": BlockType.TABLE, "table_rows": ()},
@@ -147,13 +173,16 @@ def test_section_rejects_invalid_contracts(overrides: dict[str, object]) -> None
 
 
 def test_normalized_document_exposes_statistics_and_quality() -> None:
-    warning = ParseWarning("SHORT_DOCUMENT", "content is shorter than expected")
+    warning = ParseWarning(
+        code="SHORT_DOCUMENT",
+        message="content is shorter than expected",
+    )
     document = _document(warnings=(warning,))
 
     assert document.quality_status is QualityStatus.WARN
     assert document.text_char_count == len("Visible filing content.")
     assert document.table_count == 0
-    assert warning.to_dict()["code"] == "SHORT_DOCUMENT"
+    assert warning.model_dump(mode="json")["code"] == "SHORT_DOCUMENT"
     assert _document().quality_status is QualityStatus.PASS
 
 
@@ -169,7 +198,7 @@ def test_normalized_document_exposes_statistics_and_quality() -> None:
         {"title": ""},
         {"blocks": ()},
         {"sections": ()},
-        {"blocks": (replace(_block(), ordinal=1),)},
+        {"blocks": (_block(ordinal=1),)},
     ],
 )
 def test_normalized_document_rejects_invalid_contracts(
@@ -207,7 +236,7 @@ def test_parser_diagnostics_are_bounded(code: str, message: str) -> None:
     with pytest.raises(ValueError):
         DocumentParseError(message, code=code)
     with pytest.raises(ValueError):
-        ParseWarning(code, message)
+        ParseWarning(code=code, message=message)
 
 
 @pytest.mark.parametrize(

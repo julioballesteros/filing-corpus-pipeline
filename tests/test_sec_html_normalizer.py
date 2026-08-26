@@ -8,7 +8,7 @@ import pytest
 from lxml import etree
 from lxml import html as lxml_html
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.normalization import (
     BlockType,
     DocumentParseError,
@@ -25,7 +25,7 @@ def _filing(form: FilingForm) -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000000000-25-000001",
-        issuer=IssuerReference("sec", "0000000000"),
+        provider_issuer_id="0000000000",
         issuer_name="Example Issuer",
         form=form,
         filed_on=date(2025, 4, 30),
@@ -110,7 +110,7 @@ def test_preserves_table_structure_and_visible_inline_xbrl_fact() -> None:
         ("Revenue", "125,000"),
     )
     assert tables[1].canonical_section == "financial_statements"
-    serialized_rows = tables[1].to_dict()["table_rows"]
+    serialized_rows = tables[1].model_dump(mode="json", by_alias=True)["table_rows"]
     assert isinstance(serialized_rows, list)
     assert serialized_rows[-1] == ["Revenue", "125,000"]
 

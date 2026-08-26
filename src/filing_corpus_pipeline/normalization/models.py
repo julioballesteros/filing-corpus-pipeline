@@ -1,26 +1,21 @@
 """Contracts for deterministic raw-filing normalization."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import StrEnum
 
+from pydantic import AwareDatetime, Field, model_validator
+
 from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.models import (
+    LowercaseSha256Digest,
+    NonEmptyString,
+    PipelineModel,
+)
 from filing_corpus_pipeline.registry.models import NormalizedCorpusMetadata
 
 NORMALIZATION_SCHEMA_VERSION = "1"
 SEC_HTML_PARSER_VERSION = "sec-html-v2"
-
-
-def _require_text(value: str, *, field: str) -> None:
-    if not value.strip():
-        raise ValueError(f"{field} must not be empty")
-
-
-def _require_sha256(value: str, *, field: str) -> None:
-    if len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise ValueError(f"{field} must be a lowercase SHA-256 digest")
 
 
 class BlockType(StrEnum):
@@ -49,38 +44,28 @@ class NormalizationOutcome(StrEnum):
     NOT_RETRYABLE = "NOT_RETRYABLE"
 
 
-@dataclass(frozen=True, slots=True)
-class NormalizationRequest:
+class NormalizationRequest(PipelineModel):
     """Request to normalize one acquired filing under a bounded lease."""
 
     filing: FilingReference
-    owner_id: str
-    requested_at: datetime
-    lease_duration: timedelta
-
-    def __post_init__(self) -> None:
-        _require_text(self.owner_id, field="owner_id")
-        if self.requested_at.tzinfo is None or self.requested_at.utcoffset() is None:
-            raise ValueError("requested_at must include a timezone offset")
-        if self.lease_duration <= timedelta(0):
-            raise ValueError("lease_duration must be positive")
-        if self.lease_duration > timedelta(days=1):
-            raise ValueError("lease_duration must not exceed one day")
+    owner_id: NonEmptyString
+    requested_at: AwareDatetime
+    lease_duration: timedelta = Field(
+        gt=timedelta(0),
+        le=timedelta(days=1),
+    )
 
 
-@dataclass(frozen=True, slots=True)
-class NormalizationResult:
+class NormalizationResult(PipelineModel):
     """Bounded workflow result pointing to committed corpus artifacts."""
 
-    filing_key: str
+    filing_key: NonEmptyString
     outcome: NormalizationOutcome
-    attempt_count: int
+    attempt_count: int = Field(gt=0)
     corpus: NormalizedCorpusMetadata | None = None
 
-    def __post_init__(self) -> None:
-        _require_text(self.filing_key, field="filing_key")
-        if self.attempt_count < 1:
-            raise ValueError("attempt_count must be positive")
+    @model_validator(mode="after")
+    def _validate_corpus_disposition(self) -> "NormalizationResult":
         has_corpus = self.outcome in {
             NormalizationOutcome.NORMALIZED,
             NormalizationOutcome.ALREADY_COMPLETED,
@@ -89,172 +74,111 @@ class NormalizationResult:
             raise ValueError(
                 "corpus metadata is required only for completed normalization"
             )
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "filing_key": self.filing_key,
-            "outcome": self.outcome.value,
-            "attempt_count": self.attempt_count,
-            "corpus": self.corpus.to_dict() if self.corpus is not None else None,
-        }
+        return self
 
 
-@dataclass(frozen=True, slots=True)
-class ParseWarning:
+class ParseWarning(PipelineModel):
     """A bounded data-quality finding that does not discard the document."""
 
-    code: str
-    message: str
-
-    def __post_init__(self) -> None:
-        if not self.code.strip() or len(self.code) > 100:
-            raise ValueError("warning code must contain at most 100 characters")
-        if not self.message.strip() or len(self.message) > 1000:
-            raise ValueError("warning message must contain at most 1000 characters")
-
-    def to_dict(self) -> dict[str, str]:
-        return {"code": self.code, "message": self.message}
+    code: NonEmptyString = Field(max_length=100)
+    message: NonEmptyString = Field(max_length=1000)
 
 
-@dataclass(frozen=True, slots=True)
-class RawFilingDocument:
+class RawFilingDocument(PipelineModel):
     """Raw object bytes plus the provenance needed to normalize them."""
 
-    filing_key: str
+    filing_key: NonEmptyString
     filing: FilingReference
     body: bytes
-    content_type: str
-    expected_sha256: str | None = None
-
-    def __post_init__(self) -> None:
-        _require_text(self.filing_key, field="filing_key")
-        _require_text(self.content_type, field="content_type")
-        if self.expected_sha256 is not None:
-            _require_sha256(self.expected_sha256, field="expected_sha256")
+    content_type: NonEmptyString
+    expected_sha256: LowercaseSha256Digest | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentBlock:
-    """One ordered, independently addressable unit of normalized content."""
+class BlockSection(PipelineModel):
+    """Section identity embedded in each serialized document block."""
 
-    block_id: str
-    ordinal: int
-    block_type: BlockType
-    text: str
-    content_sha256: str
-    section_id: str
+    id: NonEmptyString
     part: str | None
     item: str | None
-    canonical_section: str
-    section_heading: str
+    canonical_name: NonEmptyString
+    heading: NonEmptyString
+
+
+class DocumentBlock(PipelineModel):
+    """One ordered, independently addressable unit of normalized content."""
+
+    block_id: NonEmptyString
+    ordinal: int = Field(ge=0)
+    block_type: BlockType = Field(serialization_alias="type")
+    text: NonEmptyString
+    content_sha256: LowercaseSha256Digest
+    section: BlockSection
     table_rows: tuple[tuple[str, ...], ...] | None = None
 
-    def __post_init__(self) -> None:
-        _require_text(self.block_id, field="block_id")
-        if self.ordinal < 0:
-            raise ValueError("ordinal must not be negative")
-        _require_text(self.text, field="text")
-        _require_sha256(self.content_sha256, field="content_sha256")
-        _require_text(self.section_id, field="section_id")
-        _require_text(self.canonical_section, field="canonical_section")
-        _require_text(self.section_heading, field="section_heading")
+    @model_validator(mode="after")
+    def _validate_table_rows(self) -> "DocumentBlock":
         if (self.block_type is BlockType.TABLE) != (self.table_rows is not None):
             raise ValueError("table_rows must be present only for table blocks")
         if self.table_rows is not None and not self.table_rows:
             raise ValueError("table_rows must not be empty")
+        return self
 
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "block_id": self.block_id,
-            "ordinal": self.ordinal,
-            "type": self.block_type.value,
-            "text": self.text,
-            "content_sha256": self.content_sha256,
-            "section": {
-                "id": self.section_id,
-                "part": self.part,
-                "item": self.item,
-                "canonical_name": self.canonical_section,
-                "heading": self.section_heading,
-            },
-            "table_rows": (
-                [list(row) for row in self.table_rows]
-                if self.table_rows is not None
-                else None
-            ),
-        }
+    @property
+    def section_id(self) -> str:
+        return self.section.id
+
+    @property
+    def part(self) -> str | None:
+        return self.section.part
+
+    @property
+    def item(self) -> str | None:
+        return self.section.item
+
+    @property
+    def canonical_section(self) -> str:
+        return self.section.canonical_name
+
+    @property
+    def section_heading(self) -> str:
+        return self.section.heading
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentSection:
+class DocumentSection(PipelineModel):
     """A compact index entry for a contiguous set of blocks."""
 
-    section_id: str
+    section_id: NonEmptyString = Field(serialization_alias="id")
     part: str | None
     item: str | None
-    canonical_name: str
-    heading: str
-    first_ordinal: int
-    block_count: int
-    text_length: int
-
-    def __post_init__(self) -> None:
-        _require_text(self.section_id, field="section_id")
-        _require_text(self.canonical_name, field="canonical_name")
-        _require_text(self.heading, field="heading")
-        if self.first_ordinal < 0:
-            raise ValueError("first_ordinal must not be negative")
-        if self.block_count < 1:
-            raise ValueError("block_count must be positive")
-        if self.text_length < 1:
-            raise ValueError("text_length must be positive")
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "id": self.section_id,
-            "part": self.part,
-            "item": self.item,
-            "canonical_name": self.canonical_name,
-            "heading": self.heading,
-            "first_ordinal": self.first_ordinal,
-            "block_count": self.block_count,
-            "text_length": self.text_length,
-        }
+    canonical_name: NonEmptyString
+    heading: NonEmptyString
+    first_ordinal: int = Field(ge=0)
+    block_count: int = Field(gt=0)
+    text_length: int = Field(gt=0)
 
 
-@dataclass(frozen=True, slots=True)
-class NormalizedDocument:
+class NormalizedDocument(PipelineModel):
     """Versioned, provider-neutral corpus document produced from one filing."""
 
-    filing_key: str
+    filing_key: NonEmptyString
     filing: FilingReference
-    parser_version: str
-    schema_version: str
-    source_sha256: str
-    source_content_length: int
-    source_content_type: str
-    title: str
-    blocks: tuple[DocumentBlock, ...]
-    sections: tuple[DocumentSection, ...]
+    parser_version: NonEmptyString
+    schema_version: NonEmptyString
+    source_sha256: LowercaseSha256Digest
+    source_content_length: int = Field(gt=0)
+    source_content_type: NonEmptyString
+    title: NonEmptyString
+    blocks: tuple[DocumentBlock, ...] = Field(min_length=1)
+    sections: tuple[DocumentSection, ...] = Field(min_length=1)
     warnings: tuple[ParseWarning, ...] = ()
 
-    def __post_init__(self) -> None:
-        _require_text(self.filing_key, field="filing_key")
-        _require_text(self.parser_version, field="parser_version")
-        _require_text(self.schema_version, field="schema_version")
-        _require_sha256(self.source_sha256, field="source_sha256")
-        if self.source_content_length < 1:
-            raise ValueError("source_content_length must be positive")
-        _require_text(self.source_content_type, field="source_content_type")
-        _require_text(self.title, field="title")
-        if not self.blocks:
-            raise ValueError("blocks must not be empty")
-        if not self.sections:
-            raise ValueError("sections must not be empty")
+    @model_validator(mode="after")
+    def _validate_block_ordinals(self) -> "NormalizedDocument":
         if tuple(block.ordinal for block in self.blocks) != tuple(
             range(len(self.blocks))
         ):
             raise ValueError("block ordinals must be contiguous from zero")
+        return self
 
     @property
     def quality_status(self) -> QualityStatus:

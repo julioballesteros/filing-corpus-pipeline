@@ -1,17 +1,14 @@
 """Provider-neutral values for acquiring one raw filing document."""
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import StrEnum
 from urllib.parse import quote
 
+from pydantic import AwareDatetime, Field, model_validator
+
 from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.models import NonEmptyString, PipelineModel
 from filing_corpus_pipeline.registry import RawDocumentMetadata
-
-
-def _require_aware(value: datetime, *, field: str) -> None:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field} must include a timezone offset")
 
 
 def raw_document_key(filing: FilingReference) -> str:
@@ -29,40 +26,26 @@ def raw_document_key(filing: FilingReference) -> str:
     return key
 
 
-@dataclass(frozen=True, slots=True)
-class AcquisitionRequest:
+class AcquisitionRequest(PipelineModel):
     """Request to claim and acquire one discovered filing."""
 
     filing: FilingReference
-    owner_id: str
-    requested_at: datetime
-    lease_duration: timedelta
-
-    def __post_init__(self) -> None:
-        if not self.owner_id.strip():
-            raise ValueError("owner_id must not be empty")
-        _require_aware(self.requested_at, field="requested_at")
-        if self.lease_duration <= timedelta(0):
-            raise ValueError("lease_duration must be positive")
-        if self.lease_duration > timedelta(days=1):
-            raise ValueError("lease_duration must not exceed one day")
+    owner_id: NonEmptyString
+    requested_at: AwareDatetime
+    lease_duration: timedelta = Field(
+        gt=timedelta(0),
+        le=timedelta(days=1),
+    )
 
 
-@dataclass(frozen=True, slots=True)
-class RetrievedDocument:
+class RetrievedDocument(PipelineModel):
     """Raw bytes and source response metadata returned by a provider adapter."""
 
     body: bytes
-    content_type: str
-    source_url: str
+    content_type: NonEmptyString
+    source_url: NonEmptyString
     source_etag: str | None = None
     source_last_modified: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.content_type.strip():
-            raise ValueError("content_type must not be empty")
-        if not self.source_url.strip():
-            raise ValueError("source_url must not be empty")
 
 
 class AcquisitionOutcome(StrEnum):
@@ -74,35 +57,21 @@ class AcquisitionOutcome(StrEnum):
     NOT_RETRYABLE = "NOT_RETRYABLE"
 
 
-@dataclass(frozen=True, slots=True)
-class AcquisitionResult:
+class AcquisitionResult(PipelineModel):
     """Small workflow-safe result; document bytes are never included."""
 
-    filing_key: str
+    filing_key: NonEmptyString
     outcome: AcquisitionOutcome
-    attempt_count: int
+    attempt_count: int = Field(gt=0)
     document: RawDocumentMetadata | None = None
 
-    def __post_init__(self) -> None:
-        if not self.filing_key.strip():
-            raise ValueError("filing_key must not be empty")
-        if self.attempt_count < 1:
-            raise ValueError("attempt_count must be positive")
+    @model_validator(mode="after")
+    def _validate_document_disposition(self) -> "AcquisitionResult":
         if (self.outcome is AcquisitionOutcome.RAW_STORED) != (
             self.document is not None
         ):
             raise ValueError("document metadata is required only for RAW_STORED")
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a bounded payload suitable for Step Functions state."""
-        return {
-            "filing_key": self.filing_key,
-            "outcome": self.outcome.value,
-            "attempt_count": self.attempt_count,
-            "document": (
-                self.document.to_dict() if self.document is not None else None
-            ),
-        }
+        return self
 
 
 class DocumentRetrievalError(RuntimeError):

@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.entrypoints import normalization_lambda
 from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 from filing_corpus_pipeline.normalization import (
@@ -24,7 +24,7 @@ def filing() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="accession",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -38,7 +38,7 @@ def filing() -> FilingReference:
 
 def event() -> dict[str, object]:
     return {
-        "filing": filing().to_dict(),
+        "filing": filing().model_dump(mode="json"),
         "owner_id": "execution-1",
         "requested_at": NOW.isoformat(),
     }
@@ -107,7 +107,7 @@ def test_handler_builds_service_and_returns_bounded_corpus_metadata(
     result = normalization_lambda.handler(event(), object())
 
     assert result["outcome"] == "NORMALIZED"
-    assert result["corpus"] == corpus().to_dict()
+    assert result["corpus"] == corpus().model_dump(mode="json")
     assert stub.requests[0].lease_duration == timedelta(minutes=10)
     assert composition == [
         {
@@ -147,9 +147,13 @@ def test_handler_propagates_a_classified_service_failure(
         [],
         {},
         {"filing": {}, "owner_id": "owner", "requested_at": NOW.isoformat()},
-        {"filing": filing().to_dict(), "owner_id": "", "requested_at": "bad"},
         {
-            "filing": filing().to_dict(),
+            "filing": filing().model_dump(mode="json"),
+            "owner_id": "",
+            "requested_at": "bad",
+        },
+        {
+            "filing": filing().model_dump(mode="json"),
             "owner_id": "owner",
             "requested_at": "2025-08-01T18:00:00",
         },

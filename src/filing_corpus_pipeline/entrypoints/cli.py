@@ -85,4 +85,4 @@ def main(argv: Sequence[str] | None = None) -> None:
         filed_to=filed_to,
     )
     result = build_sec_discovery_service(user_agent).execute(request)
-    print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    print(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))

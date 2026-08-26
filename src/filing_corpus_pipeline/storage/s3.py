@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import NoReturn, Protocol
 
+from pydantic import Field, model_validator
+
+from filing_corpus_pipeline.models import (
+    NonEmptyString,
+    PipelineModel,
+    Sha256Digest,
+)
 from filing_corpus_pipeline.registry.models import RawDocumentMetadata
 
 
@@ -46,33 +53,17 @@ class RawObjectIntegrityError(RawObjectStorageError):
     """A stored raw object no longer matches its registry metadata."""
 
 
-@dataclass(frozen=True, slots=True)
-class RawObjectWrite:
+class RawObjectWrite(PipelineModel):
     """The raw object body and provenance supplied by acquisition."""
 
-    key: str
-    body: bytes
-    sha256: str
-    content_type: str
-    filing_key: str
-    source_url: str
+    key: NonEmptyString
+    body: bytes = Field(min_length=1)
+    sha256: Sha256Digest
+    content_type: NonEmptyString
+    filing_key: NonEmptyString
+    source_url: NonEmptyString
     source_etag: str | None = None
     source_last_modified: str | None = None
-
-    def __post_init__(self) -> None:
-        for field in ("key", "content_type", "filing_key", "source_url"):
-            if not str(getattr(self, field)).strip():
-                raise ValueError(f"{field} must not be empty")
-        if not self.body:
-            raise ValueError("body must not be empty")
-        if len(self.sha256) != 64:
-            raise ValueError("sha256 must be a 64-character hexadecimal digest")
-        try:
-            bytes.fromhex(self.sha256)
-        except ValueError as error:
-            raise ValueError(
-                "sha256 must be a 64-character hexadecimal digest"
-            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,37 +235,25 @@ class NormalizedObjectCollisionError(NormalizedObjectStorageError):
     """A deterministic corpus key already contains different bytes."""
 
 
-@dataclass(frozen=True, slots=True)
-class NormalizedCorpusWrite:
+class NormalizedCorpusWrite(PipelineModel):
     """Self-contained normalized artifact bytes ready for immutable storage."""
 
-    prefix: str
-    manifest: bytes
-    manifest_sha256: str
-    blocks: bytes
-    blocks_sha256: str
-    filing_key: str
-    parser_version: str
-    source_sha256: str
+    prefix: NonEmptyString
+    manifest: bytes = Field(min_length=1)
+    manifest_sha256: Sha256Digest
+    blocks: bytes = Field(min_length=1)
+    blocks_sha256: Sha256Digest
+    filing_key: NonEmptyString
+    parser_version: NonEmptyString
+    source_sha256: Sha256Digest
 
-    def __post_init__(self) -> None:
-        for field in ("prefix", "filing_key", "parser_version"):
-            if not str(getattr(self, field)).strip():
-                raise ValueError(f"{field} must not be empty")
-        if not self.manifest or not self.blocks:
-            raise ValueError("normalized artifact bodies must not be empty")
-        for field in ("manifest_sha256", "blocks_sha256", "source_sha256"):
-            value = str(getattr(self, field))
-            if len(value) != 64:
-                raise ValueError(f"{field} must be a SHA-256 digest")
-            try:
-                bytes.fromhex(value)
-            except ValueError as error:
-                raise ValueError(f"{field} must be a SHA-256 digest") from error
-        if sha256(self.manifest).hexdigest() != self.manifest_sha256.lower():
+    @model_validator(mode="after")
+    def _validate_artifact_digests(self) -> "NormalizedCorpusWrite":
+        if sha256(self.manifest).hexdigest() != self.manifest_sha256:
             raise ValueError("manifest_sha256 does not match manifest bytes")
-        if sha256(self.blocks).hexdigest() != self.blocks_sha256.lower():
+        if sha256(self.blocks).hexdigest() != self.blocks_sha256:
             raise ValueError("blocks_sha256 does not match block bytes")
+        return self
 
 
 @dataclass(frozen=True, slots=True)

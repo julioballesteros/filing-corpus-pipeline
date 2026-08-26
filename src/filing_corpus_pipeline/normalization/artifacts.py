@@ -41,7 +41,10 @@ def normalized_document_prefix(document: NormalizedDocument) -> str:
 
 def render_artifacts(document: NormalizedDocument) -> NormalizationArtifacts:
     """Render reproducible JSONL and a self-describing manifest."""
-    jsonl = b"".join(_json_bytes(block.to_dict()) + b"\n" for block in document.blocks)
+    jsonl = b"".join(
+        _json_bytes(block.model_dump(mode="json", by_alias=True)) + b"\n"
+        for block in document.blocks
+    )
     compressed_blocks = gzip.compress(jsonl, compresslevel=9, mtime=0)
     blocks_digest = sha256(compressed_blocks).hexdigest()
 
@@ -49,7 +52,7 @@ def render_artifacts(document: NormalizedDocument) -> NormalizationArtifacts:
         "schema_version": document.schema_version,
         "parser_version": document.parser_version,
         "filing_key": document.filing_key,
-        "filing": document.filing.to_dict(),
+        "filing": document.filing.model_dump(mode="json"),
         "source": {
             "sha256": document.source_sha256,
             "content_length": document.source_content_length,
@@ -58,7 +61,9 @@ def render_artifacts(document: NormalizedDocument) -> NormalizationArtifacts:
         "document": {"title": document.title},
         "quality": {
             "status": document.quality_status.value,
-            "warnings": [warning.to_dict() for warning in document.warnings],
+            "warnings": [
+                warning.model_dump(mode="json") for warning in document.warnings
+            ],
         },
         "statistics": {
             "block_count": len(document.blocks),
@@ -66,7 +71,10 @@ def render_artifacts(document: NormalizedDocument) -> NormalizationArtifacts:
             "table_count": document.table_count,
             "text_char_count": document.text_char_count,
         },
-        "sections": [section.to_dict() for section in document.sections],
+        "sections": [
+            section.model_dump(mode="json", by_alias=True)
+            for section in document.sections
+        ],
         "artifacts": {
             "blocks": {
                 "filename": BLOCKS_FILENAME,

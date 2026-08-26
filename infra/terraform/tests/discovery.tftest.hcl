@@ -173,16 +173,6 @@ run "default_ingestion_slice" {
   }
 
   assert {
-    condition = alltrue([
-      contains(data.archive_file.discovery.excludes, "filing_corpus_pipeline/normalization/**"),
-      contains(data.archive_file.acquisition.excludes, "filing_corpus_pipeline/normalization/**"),
-      contains(data.archive_file.discovery.excludes, "filing_corpus_pipeline/entrypoints/normalization_lambda.py"),
-      contains(data.archive_file.acquisition.excludes, "filing_corpus_pipeline/entrypoints/normalization_lambda.py"),
-    ])
-    error_message = "The existing Lambda source ZIPs must exclude the dependency-bearing normalization feature."
-  }
-
-  assert {
     condition     = aws_lambda_function.discovery.reserved_concurrent_executions == null
     error_message = "Reserved concurrency must be opt-in for quota-constrained accounts."
   }

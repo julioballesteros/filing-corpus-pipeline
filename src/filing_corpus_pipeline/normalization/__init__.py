@@ -10,6 +10,7 @@ from filing_corpus_pipeline.normalization.artifacts import (
 from filing_corpus_pipeline.normalization.models import (
     NORMALIZATION_SCHEMA_VERSION,
     SEC_HTML_PARSER_VERSION,
+    BlockSection,
     BlockType,
     DocumentBlock,
     DocumentParseError,
@@ -36,6 +37,7 @@ __all__ = [
     "MANIFEST_FILENAME",
     "NORMALIZATION_SCHEMA_VERSION",
     "SEC_HTML_PARSER_VERSION",
+    "BlockSection",
     "BlockType",
     "DocumentBlock",
     "DocumentParseError",

@@ -137,7 +137,7 @@ def test_parser_derives_a_rolling_window_from_scheduled_time() -> None:
                 **valid_event(),
                 "forms": [],
             },
-            "at least one filing form",
+            "forms",
         ),
         (
             {

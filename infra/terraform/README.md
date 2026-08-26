@@ -26,7 +26,8 @@ ARN as both claim owners. Filing bodies never enter workflow state.
 ## Included
 
 - separate Python 3.13 ZIPs and explicit handlers for discovery, acquisition,
-  and normalization; the latter reproducibly packages Linux arm64 `lxml`;
+  and normalization; all package the locked Linux arm64 Pydantic runtime, and
+  normalization additionally packages Linux arm64 `lxml`;
 - a Standard Step Functions state machine with a failure-isolated acquisition
   `Map` and classified retries;
 - an EventBridge schedule with a deterministic rolling-window input;
@@ -53,7 +54,7 @@ permission to manage Lambda, IAM, Step Functions, EventBridge Scheduler,
 CloudWatch Logs, X-Ray configuration, DynamoDB, and S3.
 
 ```bash
-uv run python scripts/build_normalization_lambda.py
+uv run python scripts/build_lambda_packages.py
 cd infra/terraform
 cp terraform.tfvars.example terraform.tfvars
 # Replace the example AWS account ID and SEC contact address before continuing.

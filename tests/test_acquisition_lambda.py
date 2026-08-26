@@ -10,7 +10,7 @@ from filing_corpus_pipeline.acquisition import (
     AcquisitionResult,
     RetryableAcquisitionError,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference, IssuerReference
+from filing_corpus_pipeline.domain import FilingForm, FilingReference
 from filing_corpus_pipeline.entrypoints import acquisition_lambda
 from filing_corpus_pipeline.entrypoints.acquisition_lambda import (
     InvalidAcquisitionEvent,
@@ -41,7 +41,7 @@ def filing_reference() -> FilingReference:
     return FilingReference(
         provider="sec",
         provider_filing_id="0000320193-25-000079",
-        issuer=IssuerReference("sec", "0000320193"),
+        provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
         form=FilingForm.TEN_Q,
         filed_on=date(2025, 8, 1),
@@ -56,7 +56,7 @@ def filing_reference() -> FilingReference:
 def valid_event() -> dict[str, object]:
     """Build the Map-to-Lambda event contract."""
     return {
-        "filing": filing_reference().to_dict(),
+        "filing": filing_reference().model_dump(mode="json"),
         "owner_id": ("arn:aws:states:eu-west-1:123456789012:execution:workflow:run-1"),
         "requested_at": "2025-08-01T18:00:00Z",
     }
@@ -109,7 +109,7 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
 
     result = acquisition_lambda.handler(valid_event(), object())
 
-    assert result == stored_result().to_dict()
+    assert result == stored_result().model_dump(mode="json")
     assert "body" not in str(result)
     assert composition_calls == [
         {
@@ -153,13 +153,16 @@ def test_handler_preserves_retryable_error_type(
     [
         ([], "event must be a JSON object"),
         ({}, "missing required field: filing"),
-        ({**valid_event(), "filing": []}, "filing must be a JSON object"),
+        ({**valid_event(), "filing": []}, "valid dictionary"),
         (
             {
                 **valid_event(),
-                "filing": {**filing_reference().to_dict(), "form": "8-K"},
+                "filing": {
+                    **filing_reference().model_dump(mode="json"),
+                    "form": "8-K",
+                },
             },
-            "form must be 10-K or 10-Q",
+            "form",
         ),
         ({**valid_event(), "owner_id": ""}, "owner_id must be a non-empty string"),
         (
@@ -183,7 +186,7 @@ def test_parser_rejects_invalid_map_input(event: object, message: str) -> None:
 
 def test_parser_translates_invalid_lease_policy() -> None:
     """Invalid composition policy is expressed at the entrypoint boundary."""
-    with pytest.raises(InvalidAcquisitionEvent, match="positive"):
+    with pytest.raises(InvalidAcquisitionEvent, match="lease_duration"):
         acquisition_lambda.parse_acquisition_event(
             valid_event(),
             lease_duration=timedelta(0),

@@ -143,7 +143,7 @@ def test_sec_source_returns_only_requested_forms_and_dates() -> None:
     )
     service = DiscoveryService(SecFilingDiscoverySource(build_client(transport)))
     request = DiscoveryRequest(
-        issuers=(IssuerReference("sec", "320193"),),
+        issuers=(IssuerReference(provider="sec", provider_issuer_id="320193"),),
         forms=frozenset(FilingForm),
         filed_from=date(2024, 1, 1),
         filed_to=date(2026, 8, 31),
