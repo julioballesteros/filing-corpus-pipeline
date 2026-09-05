@@ -17,10 +17,24 @@ resource "aws_sfn_state_machine" "discovery" {
         Resource = "arn:aws:states:::lambda:invoke"
         Parameters = {
           FunctionName = aws_lambda_function.discovery.arn
-          "Payload.$"  = "$"
+          Payload = {
+            "window.$" = "$"
+            target_config = {
+              bucket     = aws_s3_bucket.target_config.bucket
+              key        = aws_s3_object.discovery_targets.key
+              version_id = aws_s3_object.discovery_targets.version_id
+              sha256     = local.discovery_target_manifest_sha256
+            }
+          }
         }
         OutputPath = "$.Payload"
         Retry = [
+          {
+            ErrorEquals     = ["RetryableDiscoveryTargetError"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          },
           {
             ErrorEquals = [
               "Lambda.AWSLambdaException",
@@ -221,6 +235,7 @@ resource "aws_sfn_state_machine" "discovery" {
           "issuers_scanned.$" = "$.issuers_scanned"
           "filings_found.$"   = "$.filings_found"
           "filing_results.$"  = "$.filing_results"
+          "target_set.$"      = "$.target_set"
         }
         End = true
       }

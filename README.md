@@ -43,6 +43,8 @@ contact address and do not commit it to the repository.
 
 - `domain`: provider-neutral filing records passed between pipeline stages.
 - `discovery`: the discovery request, result, provider port, and use case.
+- `config/discovery-targets`: source-controlled company identities, regulator
+  registrations, and per-registration filing types deployed with the stack.
 - `acquisition`: raw-document retrieval orchestration and its provider contract.
 - `normalization`: deterministic SEC HTML parsing, section classification, data
   quality findings, and versioned corpus artifact rendering.
@@ -69,40 +71,51 @@ Configure the Lambda handler as:
 filing_corpus_pipeline.entrypoints.discovery_lambda.handler
 ```
 
-The parent workflow invokes it with an explicit, replayable date range:
+The parent workflow invokes it with an explicit, replayable date range and the
+exact version of the deployed target manifest:
 
 ```json
 {
-  "provider": "sec",
-  "issuer_ids": ["0000320193", "0000789019"],
-  "forms": ["10-K", "10-Q"],
-  "filed_from": "2025-01-01",
-  "filed_to": "2025-12-31"
+  "window": {
+    "filed_from": "2025-01-01",
+    "filed_to": "2025-12-31"
+  },
+  "target_config": {
+    "bucket": "filing-corpus-pipeline-dev-config-...",
+    "key": "discovery-targets/dev.json",
+    "version_id": "...",
+    "sha256": "..."
+  }
 }
 ```
 
-`forms` may be omitted to select both supported forms. The Lambda environment
-must contain `SEC_USER_AGENT` with a declared application name and monitored
-contact address. Invalid input raises an exception so Step Functions records
-the task as failed rather than receiving a partial result.
+The target manifest contains stable internal company IDs and one or more
+regulator registrations per company. Filing types belong to a registration, so
+two companies or two regulators need not share a form selection. Discovery is
+still SEC-only in this release; a configured non-SEC regulator fails explicitly
+until regulator source routing is introduced. The Lambda environment must
+contain `SEC_USER_AGENT` with a declared application name and monitored contact
+address.
 
-For recurring runs, EventBridge Scheduler supplies its execution time instead
-of fixed dates:
+For recurring runs, EventBridge Scheduler supplies only its execution time and
+the global rolling-window policy:
 
 ```json
 {
-  "provider": "sec",
-  "issuer_ids": ["0000320193", "0000789019"],
-  "forms": ["10-K", "10-Q"],
   "scheduled_at": "<aws.scheduler.scheduled-time>",
   "lookback_days": 7
 }
 ```
 
-The handler converts `scheduled_at` to UTC and subtracts `lookback_days` to
-produce the inclusive filing-date bounds. Exact and rolling date fields are
-mutually exclusive, making every scheduled execution deterministic and
-replayable.
+Step Functions wraps that input as `window` and attaches the target object's S3
+bucket, key, version ID, and expected SHA-256. The handler loads that exact
+version, checks its size and digest, validates its strict schema, and converts
+`scheduled_at` to an inclusive UTC filing-date window. The discovery output
+retains the target-set ID, logical revision, S3 version, and digest for audit and
+replay.
+
+See [`docs/discovery-targets.md`](docs/discovery-targets.md) for company and
+registration identity, target versioning, deployment, and change procedures.
 
 ## Lambda acquisition contract
 
@@ -148,6 +161,8 @@ returns only committed corpus metadata.
 Terraform under `infra/terraform` deploys the complete first vertical slice:
 
 ```text
+Source-controlled targets -> versioned S3 config ---------------------+
+                                                                    |
 EventBridge Scheduler -> Standard Step Functions -> discovery Lambda -> SEC
                                             |
                                             +-> bounded Map
@@ -170,9 +185,10 @@ normalization additionally contains the pinned Linux `lxml` wheel. Each ZIP is
 limited to the application modules required by its handler. All three functions
 have explicit handlers, resource bounds, JSON logs, retained CloudWatch log
 groups, and X-Ray tracing.
-EventBridge sends the scheduled timestamp plus the configured watchlist and
-lookback window. Reserved concurrency is available as an opt-in control for AWS
-accounts with sufficient regional quota.
+EventBridge sends only the scheduled timestamp and global lookback window.
+Terraform deploys the target set separately and pins its exact S3 object version
+in the state-machine definition. Reserved concurrency is available as an opt-in
+control for AWS accounts with sufficient regional quota.
 
 The schedule is disabled by default. This makes deployment side-effect-safe:
 first run an exact-date execution manually, inspect its workflow output and

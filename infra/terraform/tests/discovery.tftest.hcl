@@ -23,6 +23,14 @@ mock_provider "aws" {
     }
   }
 
+  override_resource {
+    target          = aws_s3_object.discovery_targets
+    override_during = plan
+    values = {
+      version_id = "version-1"
+    }
+  }
+
   override_data {
     target          = data.aws_caller_identity.current
     override_during = plan
@@ -82,6 +90,13 @@ mock_provider "aws" {
 
   override_data {
     target = data.aws_iam_policy_document.scheduler
+    values = {
+      json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.target_config
     values = {
       json = "{\"Statement\":[],\"Version\":\"2012-10-17\"}"
     }
@@ -188,6 +203,18 @@ run "default_ingestion_slice" {
   assert {
     condition = (
       jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.DiscoverFilings.Parameters.Payload.target_config.version_id == "version-1" &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.DiscoverFilings.Parameters.Payload.target_config.sha256 == filesha256("${path.module}/../../config/discovery-targets/dev.json") &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.DiscoverFilings.Parameters.Payload["window.$"] == "$"
+    )
+    error_message = "The workflow must pin target bytes separately from the execution window."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
       .States.AcquireFilings.Type == "Map" &&
       jsondecode(aws_sfn_state_machine.discovery.definition)
       .States.AcquireFilings.MaxConcurrency == 2
@@ -273,6 +300,14 @@ run "default_ingestion_slice" {
   }
 
   assert {
+    condition = (
+      !contains(keys(jsondecode(aws_scheduler_schedule.discovery.target[0].input)), "issuer_ids") &&
+      !contains(keys(jsondecode(aws_scheduler_schedule.discovery.target[0].input)), "forms")
+    )
+    error_message = "The scheduler must not own discovery companies or filing types."
+  }
+
+  assert {
     condition     = aws_dynamodb_table.filing_registry.billing_mode == "PAY_PER_REQUEST"
     error_message = "The portfolio-scale registry must avoid provisioned idle capacity."
   }
@@ -295,6 +330,26 @@ run "default_ingestion_slice" {
   assert {
     condition     = aws_dynamodb_table.filing_registry.deletion_protection_enabled == false
     error_message = "Deletion protection must remain opt-in for the disposable dev stack."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.target_config.block_public_acls,
+      aws_s3_bucket_public_access_block.target_config.block_public_policy,
+      aws_s3_bucket_public_access_block.target_config.ignore_public_acls,
+      aws_s3_bucket_public_access_block.target_config.restrict_public_buckets,
+      aws_s3_bucket_versioning.target_config.versioning_configuration[0].status == "Enabled",
+      aws_s3_bucket.target_config.force_destroy == false,
+    ])
+    error_message = "Discovery target configuration must be private, versioned, and retained by default."
+  }
+
+  assert {
+    condition = (
+      aws_s3_object.discovery_targets.content_type == "application/json" &&
+      aws_s3_object.discovery_targets.metadata.sha256 == filesha256("${path.module}/../../config/discovery-targets/dev.json")
+    )
+    error_message = "The deployed target manifest must retain its content identity."
   }
 
   assert {

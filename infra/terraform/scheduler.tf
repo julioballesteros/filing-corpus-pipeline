@@ -18,8 +18,6 @@ resource "aws_scheduler_schedule" "discovery" {
     arn      = aws_sfn_state_machine.discovery.arn
     role_arn = aws_iam_role.scheduler.arn
     input = templatefile("${path.module}/scheduler-input.json.tftpl", {
-      filing_forms  = jsonencode(var.filing_forms)
-      issuer_ids    = jsonencode(var.issuer_ids)
       lookback_days = var.lookback_days
     })
 

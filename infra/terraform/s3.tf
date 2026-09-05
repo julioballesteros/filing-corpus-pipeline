@@ -1,5 +1,101 @@
 data "aws_caller_identity" "current" {}
 
+resource "aws_s3_bucket" "target_config" {
+  bucket        = local.target_config_bucket_name
+  force_destroy = var.target_config_bucket_force_destroy
+
+  tags = {
+    Component = "discovery-target-config"
+    Service   = "filing-ingestion"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "target_config" {
+  bucket = aws_s3_bucket.target_config.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "target_config" {
+  bucket = aws_s3_bucket.target_config.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "target_config" {
+  bucket = aws_s3_bucket.target_config.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "target_config" {
+  bucket = aws_s3_bucket.target_config.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+data "aws_iam_policy_document" "target_config" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.target_config.arn,
+      "${aws_s3_bucket.target_config.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "target_config" {
+  bucket = aws_s3_bucket.target_config.id
+  policy = data.aws_iam_policy_document.target_config.json
+
+  depends_on = [aws_s3_bucket_public_access_block.target_config]
+}
+
+resource "aws_s3_object" "discovery_targets" {
+  bucket                 = aws_s3_bucket.target_config.id
+  key                    = "discovery-targets/${var.environment}.json"
+  source                 = local.discovery_target_manifest_path
+  etag                   = filemd5(local.discovery_target_manifest_path)
+  content_type           = "application/json"
+  server_side_encryption = "AES256"
+
+  metadata = {
+    schema-version = "1"
+    sha256         = local.discovery_target_manifest_sha256
+  }
+
+  depends_on = [
+    aws_s3_bucket_policy.target_config,
+    aws_s3_bucket_server_side_encryption_configuration.target_config,
+    aws_s3_bucket_versioning.target_config,
+  ]
+}
+
 resource "aws_s3_bucket" "raw_documents" {
   bucket        = local.raw_bucket_name
   force_destroy = var.raw_bucket_force_destroy

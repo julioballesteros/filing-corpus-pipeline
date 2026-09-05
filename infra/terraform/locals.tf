@@ -8,6 +8,12 @@ locals {
   schedule_name                      = "${local.name_prefix}-discovery"
   schedule_group_name                = local.name_prefix
   registry_table_name                = "${local.name_prefix}-filing-registry"
+  target_config_bucket_name = format(
+    "%s-config-%s-%s",
+    substr(local.name_prefix, 0, 27),
+    data.aws_caller_identity.current.account_id,
+    substr(sha256("${local.name_prefix}:${var.aws_region}:config"), 0, 10),
+  )
   raw_bucket_name = format(
     "%s-raw-%s-%s",
     substr(local.name_prefix, 0, 30),
@@ -29,6 +35,12 @@ locals {
   )
   normalization_lambda_package_path = (
     "${local.lambda_package_directory}/normalization-lambda.zip"
+  )
+  discovery_target_manifest_path = abspath(
+    "${path.module}/../../config/discovery-targets/${var.environment}.json"
+  )
+  discovery_target_manifest_sha256 = filesha256(
+    local.discovery_target_manifest_path
   )
 
   common_tags = {

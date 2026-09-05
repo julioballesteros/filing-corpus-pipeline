@@ -48,6 +48,7 @@ PACKAGES = {
             source_paths=(
                 *COMMON_SOURCE_PATHS,
                 PACKAGE_ROOT / "adapters" / "__init__.py",
+                PACKAGE_ROOT / "adapters" / "aws",
                 PACKAGE_ROOT / "adapters" / "http.py",
                 PACKAGE_ROOT / "adapters" / "sec" / "__init__.py",
                 PACKAGE_ROOT / "adapters" / "sec" / "constants.py",

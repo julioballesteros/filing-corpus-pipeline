@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "target_set_id": "portfolio-core",
+  "revision": 1,
+  "description": "Initial SEC filing discovery watchlist.",
+  "companies": [
+    {
+      "company_id": "apple-inc",
+      "display_name": "Apple Inc.",
+      "registrations": [
+        {
+          "regulator": "sec",
+          "issuer_id": "0000320193",
+          "filing_types": ["10-K", "10-Q"]
+        }
+      ]
+    },
+    {
+      "company_id": "microsoft-corp",
+      "display_name": "Microsoft Corporation",
+      "registrations": [
+        {
+          "regulator": "sec",
+          "issuer_id": "0000789019",
+          "filing_types": ["10-K", "10-Q"]
+        }
+      ]
+    }
+  ]
+}

@@ -26,6 +26,17 @@ data "aws_iam_policy_document" "discovery_lambda_runtime" {
   }
 
   statement {
+    sid = "ReadVersionedDiscoveryTargets"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+    ]
+    resources = [
+      "${aws_s3_bucket.target_config.arn}/${aws_s3_object.discovery_targets.key}",
+    ]
+  }
+
+  statement {
     sid = "PublishXRayTelemetry"
     actions = [
       "xray:PutTelemetryRecords",

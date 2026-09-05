@@ -73,6 +73,24 @@ def test_service_deduplicates_and_sorts_filing_references() -> None:
     assert payload["filings"][0] == earlier.model_dump(mode="json")
 
 
+def test_service_aggregates_registration_specific_requests() -> None:
+    """Per-registration form selections share one deterministic workflow result."""
+    filing = filing_reference("0000320193-25-000001")
+    service = DiscoveryService(StubSource([filing]))
+    first = discovery_request()
+    second = discovery_request().model_copy(
+        update={
+            "issuers": (IssuerReference(provider="sec", provider_issuer_id="789019"),),
+            "forms": frozenset({FilingForm.TEN_Q}),
+        }
+    )
+
+    result = service.execute_many((first, second))
+
+    assert result.filings == (filing,)
+    assert result.issuers_scanned == 2
+
+
 def test_service_rejects_conflicting_duplicate_references() -> None:
     """The same provider ID cannot silently describe two different filings."""
     original = filing_reference("0000320193-25-000001")

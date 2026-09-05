@@ -7,14 +7,25 @@ from datetime import UTC, date, datetime, timedelta
 
 from pydantic import ValidationError
 
-from filing_corpus_pipeline.discovery import DiscoveryRequest
-from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
+from filing_corpus_pipeline.discovery import (
+    DiscoveryInvocation,
+    DiscoveryRequest,
+    DiscoveryTargetReference,
+    DiscoveryTargetSet,
+    DiscoveryWindow,
+    TargetedDiscoveryResult,
+)
+from filing_corpus_pipeline.discovery.composition import (
+    build_discovery_target_repository,
+    build_sec_discovery_service,
+)
+from filing_corpus_pipeline.discovery.targets import target_provenance
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
 from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 from filing_corpus_pipeline.models import validation_error_message
 
 LOGGER = logging.getLogger(__name__)
-SUPPORTED_PROVIDER = "sec"
+SUPPORTED_REGULATOR = "sec"
 
 
 class InvalidDiscoveryEvent(ValueError):
@@ -24,65 +35,108 @@ class InvalidDiscoveryEvent(ValueError):
 def handler(
     event: object,
     context: object,
-) -> dict[str, int | list[dict[str, str | None]]]:
+) -> dict[str, object]:
     """Execute SEC discovery and return a JSON-compatible workflow payload."""
     del context
-    request = parse_discovery_event(event)
+    invocation = parse_discovery_event(event)
     user_agent = os.environ.get("SEC_USER_AGENT")
     if not user_agent:
         raise LambdaConfigurationError("SEC_USER_AGENT must be configured")
 
-    result = build_sec_discovery_service(user_agent).execute(request)
+    target_set = build_discovery_target_repository().load(invocation.target_config)
+    requests = _sec_discovery_requests(target_set, invocation.window)
+    result = build_sec_discovery_service(user_agent).execute_many(requests)
+    targeted_result = TargetedDiscoveryResult(
+        filings=result.filings,
+        issuers_scanned=result.issuers_scanned,
+        target_set=target_provenance(target_set, invocation.target_config),
+    )
     LOGGER.info(
         "Filing discovery completed",
         extra={
-            "provider": SUPPORTED_PROVIDER,
+            "regulator": SUPPORTED_REGULATOR,
+            "target_set_id": target_set.target_set_id,
+            "target_set_revision": target_set.revision,
+            "target_config_version_id": invocation.target_config.version_id,
             "issuers_scanned": result.issuers_scanned,
             "filings_found": len(result.filings),
         },
     )
-    return result.model_dump(mode="json")
+    return targeted_result.model_dump(mode="json")
 
 
-def parse_discovery_event(event: object) -> DiscoveryRequest:
+def parse_discovery_event(event: object) -> DiscoveryInvocation:
     """Parse the stable input contract supplied by the parent workflow."""
     payload = _mapping(event, field="event")
-    provider = _required_string(payload, "provider")
-    if provider != SUPPORTED_PROVIDER:
-        raise InvalidDiscoveryEvent(f"unsupported provider: {provider!r}")
-
-    issuer_ids = _required_string_list(payload, "issuer_ids")
-    unique_issuer_ids = tuple(dict.fromkeys(issuer_ids))
-    if not unique_issuer_ids:
-        raise InvalidDiscoveryEvent("issuer_ids must not be empty")
-
-    form_values = payload.get("forms")
-    if form_values is None:
-        forms = frozenset(FilingForm)
-    else:
-        try:
-            forms = frozenset(
-                FilingForm(value) for value in _string_list(form_values, field="forms")
-            )
-        except ValueError as error:
-            raise InvalidDiscoveryEvent(f"unsupported filing form: {error}") from error
-
-    filed_from, filed_to = _filing_date_range(payload)
+    if "window" not in payload:
+        raise InvalidDiscoveryEvent("missing required field: window")
+    if "target_config" not in payload:
+        raise InvalidDiscoveryEvent("missing required field: target_config")
+    window_payload = _mapping(payload["window"], field="window")
+    filed_from, filed_to = _filing_date_range(window_payload)
     try:
-        return DiscoveryRequest(
-            issuers=tuple(
-                IssuerReference(
-                    provider=SUPPORTED_PROVIDER,
-                    provider_issuer_id=issuer_id,
-                )
-                for issuer_id in unique_issuer_ids
-            ),
-            forms=forms,
-            filed_from=filed_from,
-            filed_to=filed_to,
+        target_config = DiscoveryTargetReference.model_validate(
+            payload["target_config"]
+        )
+    except ValidationError as error:
+        raise InvalidDiscoveryEvent(
+            f"target_config.{validation_error_message(error)}"
+        ) from error
+    try:
+        return DiscoveryInvocation(
+            window=DiscoveryWindow(filed_from=filed_from, filed_to=filed_to),
+            target_config=target_config,
         )
     except ValidationError as error:
         raise InvalidDiscoveryEvent(validation_error_message(error)) from error
+
+
+def _sec_discovery_requests(
+    target_set: DiscoveryTargetSet,
+    window: DiscoveryWindow,
+) -> tuple[DiscoveryRequest, ...]:
+    """Translate per-registration target settings for the current SEC source."""
+    registrations = [
+        registration
+        for company in target_set.companies
+        for registration in company.registrations
+    ]
+    unsupported = sorted(
+        {
+            registration.regulator
+            for registration in registrations
+            if registration.regulator != SUPPORTED_REGULATOR
+        }
+    )
+    if unsupported:
+        raise InvalidDiscoveryEvent(
+            "target configuration contains regulators unsupported by this runtime: "
+            + ", ".join(unsupported)
+        )
+
+    requests: list[DiscoveryRequest] = []
+    for registration in registrations:
+        try:
+            forms = frozenset(FilingForm(value) for value in registration.filing_types)
+        except ValueError as error:
+            raise InvalidDiscoveryEvent(
+                f"unsupported SEC filing type for issuer {registration.issuer_id!r}: "
+                f"{error}"
+            ) from error
+        requests.append(
+            DiscoveryRequest(
+                issuers=(
+                    IssuerReference(
+                        provider=SUPPORTED_REGULATOR,
+                        provider_issuer_id=registration.issuer_id,
+                    ),
+                ),
+                forms=forms,
+                filed_from=window.filed_from,
+                filed_to=window.filed_to,
+            )
+        )
+    return tuple(requests)
 
 
 def _mapping(value: object, *, field: str) -> Mapping[str, object]:
@@ -95,23 +149,6 @@ def _required_string(payload: Mapping[str, object], field: str) -> str:
     value = payload.get(field)
     if not isinstance(value, str) or not value.strip():
         raise InvalidDiscoveryEvent(f"{field} must be a non-empty string")
-    return value
-
-
-def _required_string_list(
-    payload: Mapping[str, object],
-    field: str,
-) -> list[str]:
-    if field not in payload:
-        raise InvalidDiscoveryEvent(f"missing required field: {field}")
-    return _string_list(payload[field], field=field)
-
-
-def _string_list(value: object, *, field: str) -> list[str]:
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item.strip() for item in value
-    ):
-        raise InvalidDiscoveryEvent(f"{field} must be an array of non-empty strings")
     return value
 
 

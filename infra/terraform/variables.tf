@@ -56,41 +56,6 @@ variable "sec_user_agent" {
   }
 }
 
-variable "issuer_ids" {
-  description = "SEC CIKs scanned by each scheduled discovery execution."
-  type        = list(string)
-  default     = ["0000320193", "0000789019"]
-
-  validation {
-    condition = (
-      length(var.issuer_ids) > 0 &&
-      length(var.issuer_ids) <= 5 &&
-      length(distinct(var.issuer_ids)) == length(var.issuer_ids) &&
-      alltrue([
-        for issuer_id in var.issuer_ids : can(regex("^[0-9]{1,10}$", issuer_id))
-      ])
-    )
-    error_message = "issuer_ids must contain 1-5 unique SEC CIKs of at most 10 digits."
-  }
-}
-
-variable "filing_forms" {
-  description = "Filing forms included in scheduled discovery."
-  type        = list(string)
-  default     = ["10-K", "10-Q"]
-
-  validation {
-    condition = (
-      length(var.filing_forms) > 0 &&
-      length(distinct(var.filing_forms)) == length(var.filing_forms) &&
-      alltrue([
-        for form in var.filing_forms : contains(["10-K", "10-Q"], form)
-      ])
-    )
-    error_message = "filing_forms must contain unique values selected from 10-K and 10-Q."
-  }
-}
-
 variable "lookback_days" {
   description = "Number of prior days included in each scheduled discovery window."
   type        = number
@@ -154,6 +119,12 @@ variable "raw_bucket_force_destroy" {
 
 variable "normalized_bucket_force_destroy" {
   description = "Allow Terraform to delete all normalized corpus versions during bucket destruction."
+  type        = bool
+  default     = false
+}
+
+variable "target_config_bucket_force_destroy" {
+  description = "Allow Terraform to delete all discovery-target object versions during bucket destruction."
   type        = bool
   default     = false
 }

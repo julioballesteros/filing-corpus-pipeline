@@ -7,6 +7,7 @@ import pytest
 from filing_corpus_pipeline.acquisition import AcquisitionService
 from filing_corpus_pipeline.acquisition import composition as acquisition_composition
 from filing_corpus_pipeline.discovery import DiscoveryService
+from filing_corpus_pipeline.discovery import composition as discovery_composition
 from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
 from filing_corpus_pipeline.normalization import NormalizationService
 from filing_corpus_pipeline.normalization import (
@@ -20,6 +21,23 @@ def test_discovery_composition_builds_the_sec_service() -> None:
         build_sec_discovery_service("pipeline contact@example.com"),
         DiscoveryService,
     )
+
+
+def test_discovery_composition_builds_the_s3_target_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The discovery graph requests S3 only for its deployed target manifest."""
+    services: list[str] = []
+
+    def aws_client(service_name: str) -> object:
+        services.append(service_name)
+        return object()
+
+    monkeypatch.setattr(discovery_composition, "_aws_client", aws_client)
+
+    discovery_composition.build_discovery_target_repository()
+
+    assert services == ["s3"]
 
 
 def test_acquisition_composition_builds_aws_storage_and_sec_source(

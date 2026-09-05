@@ -6,10 +6,8 @@ aws_region = "eu-west-1"
 # Replace this with the target account ID. Terraform refuses other accounts.
 allowed_account_ids = ["123456789012"]
 
-# Apple and Microsoft are a deliberately small initial watchlist.
-issuer_ids = ["0000320193", "0000789019"]
-
-filing_forms  = ["10-K", "10-Q"]
+# The source-controlled target set is config/discovery-targets/dev.json.
+# This execution window is global across every company registration.
 lookback_days = 7
 
 schedule_expression = "rate(6 hours)"
@@ -40,3 +38,4 @@ registry_deletion_protection_enabled = false
 # versions. Set true only for an explicitly disposable environment.
 raw_bucket_force_destroy = false
 normalized_bucket_force_destroy = false
+target_config_bucket_force_destroy = false

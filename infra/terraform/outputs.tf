@@ -43,6 +43,16 @@ output "schedule_state" {
   value       = aws_scheduler_schedule.discovery.state
 }
 
+output "discovery_target_config" {
+  description = "Exact deployed discovery-target object identity."
+  value = {
+    bucket     = aws_s3_bucket.target_config.bucket
+    key        = aws_s3_object.discovery_targets.key
+    version_id = aws_s3_object.discovery_targets.version_id
+    sha256     = local.discovery_target_manifest_sha256
+  }
+}
+
 output "filing_registry_table_name" {
   description = "DynamoDB table used for atomic filing claims and acquisition state."
   value       = aws_dynamodb_table.filing_registry.name
