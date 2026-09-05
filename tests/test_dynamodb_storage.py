@@ -18,7 +18,7 @@ from filing_corpus_pipeline.registry import (
     NormalizedCorpusMetadata,
     RawDocumentMetadata,
 )
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.dynamodb import (
     ConditionalWriteFailed,
     DynamoDbRegistryClient,
     DynamoDbStorageError,

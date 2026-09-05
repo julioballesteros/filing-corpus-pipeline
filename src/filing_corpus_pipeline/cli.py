@@ -1,4 +1,4 @@
-"""Local command-line entry point for exercising pipeline use cases."""
+"""Local command-line interface for exercising pipeline use cases."""
 
 import argparse
 import json
@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from datetime import date
 from typing import cast
 
-from filing_corpus_pipeline.discovery import DiscoveryRequest
 from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
+from filing_corpus_pipeline.discovery.models import DiscoveryRequest
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
 
 

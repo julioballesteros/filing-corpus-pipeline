@@ -1,4 +1,4 @@
-"""Small HTTP boundary that keeps provider clients deterministic in tests."""
+"""Small HTTP client boundary shared by external source clients."""
 
 import json
 from dataclasses import dataclass
@@ -26,7 +26,7 @@ class HttpTransportError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class HttpBytesResponse:
-    """Bounded response body and provenance headers used by document adapters."""
+    """Bounded response body and the provenance headers needed by callers."""
 
     body: bytes
     content_type: str
@@ -35,7 +35,7 @@ class HttpBytesResponse:
 
 
 class JsonHttpTransport(Protocol):
-    """Port for retrieving a JSON document."""
+    """Contract for retrieving a JSON document."""
 
     def get_json(
         self,
@@ -48,7 +48,7 @@ class JsonHttpTransport(Protocol):
 
 
 class BytesHttpTransport(Protocol):
-    """Port for retrieving a response body without unbounded reads."""
+    """Contract for retrieving a response body without unbounded reads."""
 
     def get_bytes(
         self,
@@ -61,8 +61,12 @@ class BytesHttpTransport(Protocol):
         """Retrieve at most ``max_bytes`` response bytes."""
 
 
+class HttpTransport(JsonHttpTransport, BytesHttpTransport, Protocol):
+    """Complete transport required by a source client with mixed endpoints."""
+
+
 class UrllibJsonTransport:
-    """Standard-library implementation suitable for the local and Lambda runtime."""
+    """Standard-library JSON transport suitable for AWS Lambda."""
 
     def get_json(
         self,
@@ -71,7 +75,7 @@ class UrllibJsonTransport:
         headers: dict[str, str],
         timeout_seconds: float,
     ) -> object:
-        """Retrieve JSON, classifying failures for the provider retry policy."""
+        """Retrieve JSON and classify transport failures."""
         request = Request(url=url, headers=headers, method="GET")
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -84,9 +88,10 @@ class UrllibJsonTransport:
                 retryable=retryable,
                 status_code=error.code,
             ) from error
-        except URLError as error:
+        except (URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
             raise HttpTransportError(
-                f"GET {url} failed: {error.reason}",
+                f"GET {url} failed: {reason}",
                 retryable=True,
             ) from error
 
@@ -101,7 +106,7 @@ class UrllibJsonTransport:
 
 
 class UrllibBytesTransport:
-    """Bounded standard-library transport for source documents."""
+    """Bounded standard-library byte transport for source documents."""
 
     def get_bytes(
         self,
@@ -163,3 +168,7 @@ class UrllibBytesTransport:
             etag=etag,
             last_modified=last_modified,
         )
+
+
+class UrllibHttpTransport(UrllibJsonTransport, UrllibBytesTransport):
+    """Complete standard-library transport used by the SEC EDGAR client."""

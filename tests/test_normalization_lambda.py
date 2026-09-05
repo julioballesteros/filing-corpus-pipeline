@@ -6,16 +6,16 @@ from typing import cast
 import pytest
 
 from filing_corpus_pipeline.domain import FilingForm, FilingReference
-from filing_corpus_pipeline.entrypoints import normalization_lambda
-from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 from filing_corpus_pipeline.normalization import (
     NormalizationRequest,
     NormalizationResult,
     NormalizationService,
     PermanentNormalizationError,
 )
+from filing_corpus_pipeline.normalization import handler as normalization_handler
 from filing_corpus_pipeline.normalization.models import NormalizationOutcome
 from filing_corpus_pipeline.registry import NormalizedCorpusMetadata
+from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
 NOW = datetime(2025, 8, 1, 18, 0, tzinfo=UTC)
 
@@ -102,9 +102,9 @@ def test_handler_builds_service_and_returns_bounded_corpus_metadata(
         composition.append(kwargs)
         return cast(NormalizationService, stub)
 
-    monkeypatch.setattr(normalization_lambda, "build_sec_normalization_service", build)
+    monkeypatch.setattr(normalization_handler, "build_sec_normalization_service", build)
 
-    result = normalization_lambda.handler(event(), object())
+    result = normalization_handler.handler(event(), object())
 
     assert result["outcome"] == "NORMALIZED"
     assert result["corpus"] == corpus().model_dump(mode="json")
@@ -131,13 +131,13 @@ def test_handler_propagates_a_classified_service_failure(
         )
     )
     monkeypatch.setattr(
-        normalization_lambda,
+        normalization_handler,
         "build_sec_normalization_service",
         lambda **_kwargs: cast(NormalizationService, stub),
     )
 
     with pytest.raises(PermanentNormalizationError):
-        normalization_lambda.handler(event(), object())
+        normalization_handler.handler(event(), object())
 
 
 @pytest.mark.parametrize(
@@ -160,8 +160,8 @@ def test_handler_propagates_a_classified_service_failure(
     ],
 )
 def test_parse_rejects_invalid_map_items(invalid: object) -> None:
-    with pytest.raises(normalization_lambda.InvalidNormalizationEvent):
-        normalization_lambda.parse_normalization_event(
+    with pytest.raises(normalization_handler.InvalidNormalizationEvent):
+        normalization_handler.parse_normalization_event(
             invalid,
             lease_duration=timedelta(minutes=10),
         )
@@ -174,7 +174,7 @@ def test_handler_requires_every_runtime_setting(
     monkeypatch.delenv("NORMALIZED_BUCKET_NAME")
 
     with pytest.raises(LambdaConfigurationError, match="NORMALIZED_BUCKET_NAME"):
-        normalization_lambda.handler(event(), object())
+        normalization_handler.handler(event(), object())
 
 
 @pytest.mark.parametrize("value", ["zero", "0", "52428801"])
@@ -186,4 +186,4 @@ def test_handler_rejects_an_invalid_document_limit(
     monkeypatch.setenv("NORMALIZATION_MAX_DOCUMENT_BYTES", value)
 
     with pytest.raises(LambdaConfigurationError):
-        normalization_lambda.handler(event(), object())
+        normalization_handler.handler(event(), object())

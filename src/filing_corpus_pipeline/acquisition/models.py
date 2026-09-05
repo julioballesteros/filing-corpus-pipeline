@@ -39,7 +39,7 @@ class AcquisitionRequest(PipelineModel):
 
 
 class RetrievedDocument(PipelineModel):
-    """Raw bytes and source response metadata returned by a provider adapter."""
+    """Raw bytes and response metadata returned by a filing source."""
 
     body: bytes
     content_type: NonEmptyString

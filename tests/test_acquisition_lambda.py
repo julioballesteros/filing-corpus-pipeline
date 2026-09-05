@@ -10,13 +10,11 @@ from filing_corpus_pipeline.acquisition import (
     AcquisitionResult,
     RetryableAcquisitionError,
 )
+from filing_corpus_pipeline.acquisition import handler as acquisition_handler
+from filing_corpus_pipeline.acquisition.handler import InvalidAcquisitionEvent
 from filing_corpus_pipeline.domain import FilingForm, FilingReference
-from filing_corpus_pipeline.entrypoints import acquisition_lambda
-from filing_corpus_pipeline.entrypoints.acquisition_lambda import (
-    InvalidAcquisitionEvent,
-)
-from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 from filing_corpus_pipeline.registry import RawDocumentMetadata
+from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
 
 class CapturingAcquisitionService:
@@ -102,12 +100,12 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
         return service
 
     monkeypatch.setattr(
-        acquisition_lambda,
+        acquisition_handler,
         "build_sec_acquisition_service",
         build_service,
     )
 
-    result = acquisition_lambda.handler(valid_event(), object())
+    result = acquisition_handler.handler(valid_event(), object())
 
     assert result == stored_result().model_dump(mode="json")
     assert "body" not in str(result)
@@ -137,13 +135,13 @@ def test_handler_preserves_retryable_error_type(
     )
     service = CapturingAcquisitionService(failure)
     monkeypatch.setattr(
-        acquisition_lambda,
+        acquisition_handler,
         "build_sec_acquisition_service",
         lambda **_: service,
     )
 
     with pytest.raises(RetryableAcquisitionError) as raised:
-        acquisition_lambda.handler(valid_event(), object())
+        acquisition_handler.handler(valid_event(), object())
 
     assert raised.value is failure
 
@@ -178,7 +176,7 @@ def test_handler_preserves_retryable_error_type(
 def test_parser_rejects_invalid_map_input(event: object, message: str) -> None:
     """Malformed workflow state fails before an AWS client is constructed."""
     with pytest.raises(InvalidAcquisitionEvent, match=message):
-        acquisition_lambda.parse_acquisition_event(
+        acquisition_handler.parse_acquisition_event(
             event,
             lease_duration=timedelta(minutes=5),
         )
@@ -187,7 +185,7 @@ def test_parser_rejects_invalid_map_input(event: object, message: str) -> None:
 def test_parser_translates_invalid_lease_policy() -> None:
     """Invalid composition policy is expressed at the entrypoint boundary."""
     with pytest.raises(InvalidAcquisitionEvent, match="lease_duration"):
-        acquisition_lambda.parse_acquisition_event(
+        acquisition_handler.parse_acquisition_event(
             valid_event(),
             lease_duration=timedelta(0),
         )
@@ -212,7 +210,7 @@ def test_handler_requires_runtime_configuration(
     monkeypatch.delenv(missing_name)
 
     with pytest.raises(LambdaConfigurationError, match=missing_name):
-        acquisition_lambda.handler(valid_event(), object())
+        acquisition_handler.handler(valid_event(), object())
 
 
 @pytest.mark.parametrize(
@@ -235,4 +233,4 @@ def test_handler_rejects_invalid_resource_bounds(
     monkeypatch.setenv(name, value)
 
     with pytest.raises(LambdaConfigurationError, match=name):
-        acquisition_lambda.handler(valid_event(), object())
+        acquisition_handler.handler(valid_event(), object())

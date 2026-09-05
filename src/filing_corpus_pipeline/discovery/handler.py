@@ -1,47 +1,41 @@
-"""AWS Lambda entry point for a filing discovery execution."""
+"""AWS Lambda handler for one filing-discovery execution."""
 
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 
 from pydantic import ValidationError
 
-from filing_corpus_pipeline.discovery import (
-    DiscoveryInvocation,
-    DiscoveryRequest,
-    DiscoveryTargetReference,
-    DiscoveryTargetSet,
-    DiscoveryWindow,
-    TargetedDiscoveryResult,
-)
 from filing_corpus_pipeline.discovery.composition import (
     build_discovery_target_repository,
     build_sec_discovery_service,
 )
-from filing_corpus_pipeline.discovery.targets import target_provenance
+from filing_corpus_pipeline.discovery.models import DiscoveryRequest
+from filing_corpus_pipeline.discovery.targets import (
+    DiscoveryInvocation,
+    DiscoveryTargetReference,
+    DiscoveryTargetSet,
+    DiscoveryWindow,
+    TargetedDiscoveryResult,
+    target_provenance,
+)
 from filing_corpus_pipeline.domain import FilingForm, IssuerReference
-from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
 from filing_corpus_pipeline.models import validation_error_message
+from filing_corpus_pipeline.runtime.config import required_environment
 
 LOGGER = logging.getLogger(__name__)
 SUPPORTED_REGULATOR = "sec"
 
 
 class InvalidDiscoveryEvent(ValueError):
-    """Raised when the Step Functions input violates the discovery contract."""
+    """The Step Functions input violates the discovery contract."""
 
 
-def handler(
-    event: object,
-    context: object,
-) -> dict[str, object]:
-    """Execute SEC discovery and return a JSON-compatible workflow payload."""
+def handler(event: object, context: object) -> dict[str, object]:
+    """Resolve deployed targets, discover SEC filings, and return references."""
     del context
     invocation = parse_discovery_event(event)
-    user_agent = os.environ.get("SEC_USER_AGENT")
-    if not user_agent:
-        raise LambdaConfigurationError("SEC_USER_AGENT must be configured")
+    user_agent = required_environment("SEC_USER_AGENT")
 
     target_set = build_discovery_target_repository().load(invocation.target_config)
     requests = _sec_discovery_requests(target_set, invocation.window)

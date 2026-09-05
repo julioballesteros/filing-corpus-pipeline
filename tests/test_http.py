@@ -6,8 +6,8 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from filing_corpus_pipeline.adapters import http
-from filing_corpus_pipeline.adapters.http import (
+from filing_corpus_pipeline.sources import http
+from filing_corpus_pipeline.sources.http import (
     HttpTransportError,
     UrllibBytesTransport,
     UrllibJsonTransport,
@@ -165,7 +165,7 @@ def test_bytes_transport_rejects_an_invalid_limit() -> None:
 def test_bytes_transport_classifies_network_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Binary provider adapters receive retry information on network errors."""
+    """Binary source clients receive retry information on network errors."""
     monkeypatch.setattr(http, "urlopen", MagicMock(side_effect=TimeoutError("slow")))
 
     with pytest.raises(HttpTransportError) as raised:

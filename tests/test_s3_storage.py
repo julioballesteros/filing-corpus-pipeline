@@ -8,15 +8,17 @@ from typing import ClassVar, cast
 import pytest
 
 from filing_corpus_pipeline.registry import RawDocumentMetadata
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.normalized_corpus import (
     NormalizedCorpusWrite,
     NormalizedObjectCollisionError,
     NormalizedObjectStorageError,
+    S3NormalizedCorpusClient,
+)
+from filing_corpus_pipeline.storage.raw_documents import (
     RawObjectCollisionError,
     RawObjectIntegrityError,
     RawObjectStorageError,
     RawObjectWrite,
-    S3NormalizedCorpusClient,
     S3RawDocumentClient,
 )
 
@@ -304,6 +306,28 @@ def test_load_rejects_registry_or_object_integrity_mismatches(
         storage(api).load(metadata, max_bytes=1024)
 
     assert raised.value.code == code
+
+
+def test_load_classifies_an_unreadable_s3_body() -> None:
+    """Malformed SDK responses remain retryable without weakening integrity."""
+    api = StubS3Api(gets=[{"ContentLength": len(BODY), "Body": object()}])
+
+    with pytest.raises(RawObjectIntegrityError) as raised:
+        storage(api).load(raw_metadata(), max_bytes=1024)
+
+    assert raised.value.code == "RAW_OBJECT_BODY_INVALID"
+    assert raised.value.retryable is True
+
+
+def test_load_preserves_shared_s3_error_classification() -> None:
+    """Raw-document reads retain the shared client's stable failure code."""
+    api = StubS3Api(gets=[AwsError("SlowDown", 503)])
+
+    with pytest.raises(RawObjectStorageError) as raised:
+        storage(api).load(raw_metadata(), max_bytes=1024)
+
+    assert raised.value.code == "S3_SLOWDOWN"
+    assert raised.value.retryable is True
 
 
 def corpus_write() -> NormalizedCorpusWrite:

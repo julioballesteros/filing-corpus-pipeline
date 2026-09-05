@@ -10,7 +10,7 @@ resource "aws_lambda_function" "discovery" {
 
   filename         = local.discovery_lambda_package_path
   source_code_hash = filebase64sha256(local.discovery_lambda_package_path)
-  handler          = "filing_corpus_pipeline.entrypoints.discovery_lambda.handler"
+  handler          = "filing_corpus_pipeline.discovery.handler.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]
 
@@ -52,7 +52,7 @@ resource "aws_lambda_function" "acquisition" {
 
   filename         = local.acquisition_lambda_package_path
   source_code_hash = filebase64sha256(local.acquisition_lambda_package_path)
-  handler          = "filing_corpus_pipeline.entrypoints.acquisition_lambda.handler"
+  handler          = "filing_corpus_pipeline.acquisition.handler.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]
 
@@ -97,7 +97,7 @@ resource "aws_lambda_function" "normalization" {
 
   filename         = local.normalization_lambda_package_path
   source_code_hash = filebase64sha256(local.normalization_lambda_package_path)
-  handler          = "filing_corpus_pipeline.entrypoints.normalization_lambda.handler"
+  handler          = "filing_corpus_pipeline.normalization.handler.handler"
   runtime          = "python3.13"
   architectures    = ["arm64"]
 

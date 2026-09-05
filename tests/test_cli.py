@@ -5,8 +5,8 @@ from datetime import date
 
 import pytest
 
+from filing_corpus_pipeline import cli
 from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryResult
-from filing_corpus_pipeline.entrypoints import cli
 
 
 class CapturingService:

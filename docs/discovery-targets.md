@@ -53,6 +53,12 @@ The Lambda reads that exact version, limits it to 256 KiB, checks its byte
 length and SHA-256, then validates the strict Pydantic schema. Discovery output
 retains all target provenance.
 
+The concrete repository lives inside the `discovery` feature because target
+schema and integrity failures are discovery policy, and S3 is the only deployed
+backing store. It depends directly on the bounded reader in `storage.s3`; there
+is no speculative repository interface or second interchangeable
+implementation.
+
 ## Scheduling boundary
 
 The recurring scheduler input contains only the scheduled timestamp and the

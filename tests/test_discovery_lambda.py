@@ -1,4 +1,4 @@
-"""Tests for the AWS Lambda discovery adapter."""
+"""Tests for the feature-local AWS Lambda discovery handler."""
 
 from datetime import date
 
@@ -13,10 +13,10 @@ from filing_corpus_pipeline.discovery import (
     DiscoveryWindow,
     RegulatorRegistration,
 )
+from filing_corpus_pipeline.discovery import handler as discovery_handler
+from filing_corpus_pipeline.discovery.handler import InvalidDiscoveryEvent
 from filing_corpus_pipeline.domain import FilingForm
-from filing_corpus_pipeline.entrypoints import discovery_lambda
-from filing_corpus_pipeline.entrypoints.discovery_lambda import InvalidDiscoveryEvent
-from filing_corpus_pipeline.entrypoints.errors import LambdaConfigurationError
+from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
 
 class CapturingService:
@@ -112,15 +112,15 @@ def test_handler_loads_targets_and_executes_per_registration_discovery(
         user_agents.append(user_agent)
         return service
 
-    monkeypatch.setattr(discovery_lambda, "build_sec_discovery_service", build_service)
+    monkeypatch.setattr(discovery_handler, "build_sec_discovery_service", build_service)
     monkeypatch.setattr(
-        discovery_lambda,
+        discovery_handler,
         "build_discovery_target_repository",
         lambda: repository,
     )
     monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
 
-    result = discovery_lambda.handler(valid_event(), object())
+    result = discovery_handler.handler(valid_event(), object())
 
     assert result == {
         "filings": [],
@@ -153,7 +153,7 @@ def test_handler_requires_sec_user_agent(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
 
     with pytest.raises(LambdaConfigurationError, match="SEC_USER_AGENT"):
-        discovery_lambda.handler(valid_event(), object())
+        discovery_handler.handler(valid_event(), object())
 
 
 def test_parser_derives_a_global_rolling_window_from_scheduled_time() -> None:
@@ -164,7 +164,7 @@ def test_parser_derives_a_global_rolling_window_from_scheduled_time() -> None:
         "lookback_days": 7,
     }
 
-    invocation = discovery_lambda.parse_discovery_event(event)
+    invocation = discovery_handler.parse_discovery_event(event)
 
     assert invocation.window.filed_to == date(2025, 2, 28)
     assert invocation.window.filed_from == date(2025, 2, 21)
@@ -245,7 +245,7 @@ def test_parser_rejects_invalid_workflow_input(
 ) -> None:
     """Bad Step Functions input becomes a failed Lambda task."""
     with pytest.raises(InvalidDiscoveryEvent, match=message):
-        discovery_lambda.parse_discovery_event(event)
+        discovery_handler.parse_discovery_event(event)
 
 
 @pytest.mark.parametrize("lookback_days", [0, -1, 1.5, "7", True])
@@ -258,7 +258,7 @@ def test_parser_rejects_invalid_lookback_days(lookback_days: object) -> None:
     }
 
     with pytest.raises(InvalidDiscoveryEvent, match="positive integer"):
-        discovery_lambda.parse_discovery_event(event)
+        discovery_handler.parse_discovery_event(event)
 
 
 def test_sec_request_translation_rejects_an_unsupported_regulator() -> None:
@@ -283,7 +283,7 @@ def test_sec_request_translation_rejects_an_unsupported_regulator() -> None:
     )
 
     with pytest.raises(InvalidDiscoveryEvent, match=r"unsupported.*fca"):
-        discovery_lambda._sec_discovery_requests(
+        discovery_handler._sec_discovery_requests(
             targets,
             DiscoveryWindow(
                 filed_from=date(2025, 1, 1),
@@ -314,7 +314,7 @@ def test_sec_request_translation_rejects_an_unsupported_filing_type() -> None:
     )
 
     with pytest.raises(InvalidDiscoveryEvent, match="unsupported SEC filing type"):
-        discovery_lambda._sec_discovery_requests(
+        discovery_handler._sec_discovery_requests(
             targets,
             DiscoveryWindow(
                 filed_from=date(2025, 1, 1),

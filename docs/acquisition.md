@@ -32,11 +32,12 @@ and S3 metadata. Filing bytes never cross a Step Functions state boundary.
 
 `acquisition.FilingDocumentSource` is the small provider contract. This
 abstraction exists because additional filing providers are an explicit roadmap
-item. The first implementation,
-`adapters.sec.documents.SecFilingDocumentSource`, derives the canonical SEC
-archive URL from the CIK, accession number, and primary document name. It
-rejects inconsistent workflow input before HTTP, supplies the required declared
-user agent, imposes a timeout, and caps the response at 25 MiB by default.
+item. The first implementation, `acquisition.sec.SecFilingDocumentSource`, owns
+the acquisition-specific identity checks and delegates the request to the typed
+`sources.sec.SecEdgarClient`. It derives the canonical SEC archive URL from the
+CIK, accession number, and primary document name, rejects inconsistent workflow
+input before HTTP, supplies the required declared user agent, imposes a timeout,
+and caps the response at 25 MiB by default.
 
 Adding a provider means implementing this retrieval contract beside `sec` and
 registering it during runtime composition. It does not require changing S3 or

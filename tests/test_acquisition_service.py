@@ -26,7 +26,7 @@ from filing_corpus_pipeline.registry import (
     MarkRawStoredRequest,
     RegistryStatus,
 )
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.raw_documents import (
     RawObjectStorageError,
     RawObjectWrite,
     S3RawDocumentClient,

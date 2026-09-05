@@ -20,8 +20,7 @@ COMMON_SOURCE_PATHS = (
     PACKAGE_ROOT / "__init__.py",
     PACKAGE_ROOT / "models.py",
     PACKAGE_ROOT / "domain",
-    PACKAGE_ROOT / "entrypoints" / "__init__.py",
-    PACKAGE_ROOT / "entrypoints" / "errors.py",
+    PACKAGE_ROOT / "runtime",
 )
 RUNTIME_DEPENDENCIES = ("pydantic",)
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -37,7 +36,7 @@ class LambdaPackage:
 
     @property
     def handler_path(self) -> str:
-        return f"filing_corpus_pipeline/entrypoints/{self.name}_lambda.py"
+        return f"filing_corpus_pipeline/{self.name}/handler.py"
 
 
 PACKAGES = {
@@ -47,16 +46,10 @@ PACKAGES = {
             name="discovery",
             source_paths=(
                 *COMMON_SOURCE_PATHS,
-                PACKAGE_ROOT / "adapters" / "__init__.py",
-                PACKAGE_ROOT / "adapters" / "aws",
-                PACKAGE_ROOT / "adapters" / "http.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "__init__.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "constants.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "discovery.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "identifiers.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "submissions.py",
                 PACKAGE_ROOT / "discovery",
-                PACKAGE_ROOT / "entrypoints" / "discovery_lambda.py",
+                PACKAGE_ROOT / "sources",
+                PACKAGE_ROOT / "storage" / "__init__.py",
+                PACKAGE_ROOT / "storage" / "s3.py",
             ),
         ),
         LambdaPackage(
@@ -64,22 +57,18 @@ PACKAGES = {
             source_paths=(
                 *COMMON_SOURCE_PATHS,
                 PACKAGE_ROOT / "acquisition",
-                PACKAGE_ROOT / "adapters" / "__init__.py",
-                PACKAGE_ROOT / "adapters" / "http.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "__init__.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "constants.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "documents.py",
-                PACKAGE_ROOT / "adapters" / "sec" / "identifiers.py",
-                PACKAGE_ROOT / "entrypoints" / "acquisition_lambda.py",
                 PACKAGE_ROOT / "registry",
-                PACKAGE_ROOT / "storage",
+                PACKAGE_ROOT / "sources",
+                PACKAGE_ROOT / "storage" / "__init__.py",
+                PACKAGE_ROOT / "storage" / "dynamodb.py",
+                PACKAGE_ROOT / "storage" / "raw_documents.py",
+                PACKAGE_ROOT / "storage" / "s3.py",
             ),
         ),
         LambdaPackage(
             name="normalization",
             source_paths=(
                 *COMMON_SOURCE_PATHS,
-                PACKAGE_ROOT / "entrypoints" / "normalization_lambda.py",
                 PACKAGE_ROOT / "normalization",
                 PACKAGE_ROOT / "registry",
                 PACKAGE_ROOT / "storage",
@@ -214,6 +203,17 @@ def _verify_zip(output: Path, package: LambdaPackage) -> None:
     missing = required - names
     if missing:
         raise RuntimeError(f"Lambda ZIP is missing files: {sorted(missing)}")
+    legacy_modules = {
+        name
+        for name in names
+        if name.startswith("filing_corpus_pipeline/adapters/")
+        or name.startswith("filing_corpus_pipeline/entrypoints/")
+    }
+    if legacy_modules:
+        raise RuntimeError(
+            f"Lambda ZIP contains obsolete architecture modules: "
+            f"{sorted(legacy_modules)}"
+        )
     if not any(
         name.startswith("pydantic_core/_pydantic_core.cpython-313-")
         and "aarch64-linux-gnu.so" in name

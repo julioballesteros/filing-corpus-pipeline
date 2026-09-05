@@ -106,7 +106,7 @@ def test_service_rejects_conflicting_duplicate_references() -> None:
 
 
 def test_service_rejects_issuer_from_another_provider() -> None:
-    """A source adapter may only receive issuer IDs in its own namespace."""
+    """A source may only receive issuer IDs in its own namespace."""
     with pytest.raises(ValueError, match="cannot discover"):
         DiscoveryService(StubSource([])).execute(discovery_request(provider="other"))
 

@@ -7,17 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from filing_corpus_pipeline.adapters.aws.discovery_targets import (
-    InvalidDiscoveryTargetError,
-    RetryableDiscoveryTargetError,
-    S3DiscoveryTargetRepository,
-)
 from filing_corpus_pipeline.discovery import (
     DiscoveryCompany,
     DiscoveryTargetReference,
     DiscoveryTargetSet,
     RegulatorRegistration,
 )
+from filing_corpus_pipeline.discovery.target_repository import (
+    DiscoveryTargetRepository,
+    InvalidDiscoveryTargetError,
+    RetryableDiscoveryTargetError,
+)
+from filing_corpus_pipeline.storage.s3 import S3ObjectClient
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -101,12 +102,28 @@ def reference(body: bytes) -> DiscoveryTargetReference:
     )
 
 
+def repository(
+    response: Mapping[str, object] | Exception,
+    *,
+    max_bytes: int = 256 * 1024,
+) -> tuple[DiscoveryTargetRepository, StubS3Api]:
+    """Compose the feature repository over the shared bounded S3 client."""
+    api = StubS3Api(response)
+    return (
+        DiscoveryTargetRepository(
+            S3ObjectClient(api),
+            max_bytes=max_bytes,
+        ),
+        api,
+    )
+
+
 def test_repository_loads_and_validates_one_exact_object_version() -> None:
     body = json.dumps(target_payload()).encode()
     stream = BodyStream(body)
-    api = StubS3Api({"ContentLength": len(body), "Body": stream})
+    targets, api = repository({"ContentLength": len(body), "Body": stream})
 
-    result = S3DiscoveryTargetRepository(api).load(reference(body))
+    result = targets.load(reference(body))
 
     assert result.target_set_id == "portfolio-core"
     assert result.companies[0].registrations[0].issuer_id == "0000320193"
@@ -123,12 +140,10 @@ def test_repository_loads_and_validates_one_exact_object_version() -> None:
 def test_repository_rejects_an_integrity_mismatch() -> None:
     body = json.dumps(target_payload()).encode()
     wrong_reference = reference(body).model_copy(update={"sha256": "0" * 64})
-    repository = S3DiscoveryTargetRepository(
-        StubS3Api({"ContentLength": len(body), "Body": BodyStream(body)})
-    )
+    targets, _ = repository({"ContentLength": len(body), "Body": BodyStream(body)})
 
     with pytest.raises(InvalidDiscoveryTargetError, match="SHA-256"):
-        repository.load(wrong_reference)
+        targets.load(wrong_reference)
 
 
 @pytest.mark.parametrize(
@@ -176,15 +191,15 @@ def test_repository_rejects_invalid_or_incomplete_s3_responses(
     error_type: type[Exception],
     message: str,
 ) -> None:
-    repository = S3DiscoveryTargetRepository(StubS3Api(response), max_bytes=4)
+    targets, _ = repository(response, max_bytes=4)
 
     with pytest.raises(error_type, match=message):
-        repository.load(reference(b"x"))
+        targets.load(reference(b"x"))
 
 
 def test_repository_requires_a_positive_size_bound() -> None:
     with pytest.raises(ValueError, match="positive"):
-        S3DiscoveryTargetRepository(StubS3Api({}), max_bytes=0)
+        repository({}, max_bytes=0)
 
 
 @pytest.mark.parametrize(
@@ -196,33 +211,31 @@ def test_repository_requires_a_positive_size_bound() -> None:
     ],
 )
 def test_repository_rejects_invalid_json_or_schema(body: bytes) -> None:
-    repository = S3DiscoveryTargetRepository(
-        StubS3Api({"ContentLength": len(body), "Body": BodyStream(body)})
-    )
+    targets, _ = repository({"ContentLength": len(body), "Body": BodyStream(body)})
 
     with pytest.raises(InvalidDiscoveryTargetError):
-        repository.load(reference(body))
+        targets.load(reference(body))
 
 
 def test_repository_classifies_transient_s3_errors_for_workflow_retry() -> None:
-    repository = S3DiscoveryTargetRepository(StubS3Api(AwsError("SlowDown", 503)))
+    targets, _ = repository(AwsError("SlowDown", 503))
 
     with pytest.raises(RetryableDiscoveryTargetError, match="SlowDown"):
-        repository.load(reference(b"{}"))
+        targets.load(reference(b"{}"))
 
 
 def test_repository_classifies_missing_versions_as_permanent() -> None:
-    repository = S3DiscoveryTargetRepository(StubS3Api(AwsError("NoSuchVersion", 404)))
+    targets, _ = repository(AwsError("NoSuchVersion", 404))
 
     with pytest.raises(InvalidDiscoveryTargetError, match="NoSuchVersion"):
-        repository.load(reference(b"{}"))
+        targets.load(reference(b"{}"))
 
 
 def test_repository_treats_unknown_sdk_failures_as_transient() -> None:
-    repository = S3DiscoveryTargetRepository(StubS3Api(OSError("offline")))
+    targets, _ = repository(OSError("offline"))
 
-    with pytest.raises(RetryableDiscoveryTargetError, match="S3 read failed"):
-        repository.load(reference(b"{}"))
+    with pytest.raises(RetryableDiscoveryTargetError, match="S3 object read failed"):
+        targets.load(reference(b"{}"))
 
 
 def test_target_set_rejects_cross_company_registration_collisions() -> None:

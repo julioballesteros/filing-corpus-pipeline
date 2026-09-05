@@ -24,7 +24,7 @@ from filing_corpus_pipeline.registry import (
     RegistryLeaseLostError,
     RegistryStatus,
 )
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.dynamodb import (
     ConditionalWriteFailed,
     DynamoDbRegistryClient,
     DynamoDbStorageError,

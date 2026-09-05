@@ -1,45 +1,29 @@
 """Runtime composition for the filing discovery feature."""
 
-from importlib import import_module
-from typing import Protocol, cast
+from typing import cast
 
-from filing_corpus_pipeline.adapters.aws.discovery_targets import (
-    DiscoveryTargetS3Api,
-    S3DiscoveryTargetRepository,
+from filing_corpus_pipeline.discovery.sec import SecFilingDiscoverySource
+from filing_corpus_pipeline.discovery.service import DiscoveryService
+from filing_corpus_pipeline.discovery.target_repository import (
+    DiscoveryTargetRepository,
 )
-from filing_corpus_pipeline.adapters.http import UrllibJsonTransport
-from filing_corpus_pipeline.adapters.sec.discovery import SecFilingDiscoverySource
-from filing_corpus_pipeline.adapters.sec.submissions import (
-    SecClientConfig,
-    SecSubmissionsClient,
-)
-from filing_corpus_pipeline.discovery import DiscoveryService
-
-
-class _AwsClientFactory(Protocol):
-    """Shape of boto3 supplied by the managed Lambda runtime."""
-
-    def client(self, service_name: str) -> object:
-        """Create one low-level AWS service client."""
+from filing_corpus_pipeline.runtime.aws import aws_client
+from filing_corpus_pipeline.sources.http import UrllibHttpTransport
+from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
+from filing_corpus_pipeline.storage.s3 import S3ObjectClient, S3ReadApi
 
 
 def build_sec_discovery_service(user_agent: str) -> DiscoveryService:
-    """Compose the SEC adapter and provider-independent discovery service."""
-    client = SecSubmissionsClient(
-        transport=UrllibJsonTransport(),
-        config=SecClientConfig(user_agent=user_agent),
+    """Compose the SEC client and discovery-specific listing behavior."""
+    client = SecEdgarClient(
+        transport=UrllibHttpTransport(),
+        config=SecEdgarClientConfig(user_agent=user_agent),
     )
     return DiscoveryService(SecFilingDiscoverySource(client))
 
 
-def build_discovery_target_repository() -> S3DiscoveryTargetRepository:
+def build_discovery_target_repository() -> DiscoveryTargetRepository:
     """Compose the S3-backed repository for deployed discovery targets."""
-    return S3DiscoveryTargetRepository(
-        cast(DiscoveryTargetS3Api, _aws_client("s3")),
+    return DiscoveryTargetRepository(
+        S3ObjectClient(cast(S3ReadApi, aws_client("s3"))),
     )
-
-
-def _aws_client(service_name: str) -> object:
-    """Use the AWS SDK supplied by the managed Lambda Python runtime."""
-    factory = cast(_AwsClientFactory, import_module("boto3"))
-    return factory.client(service_name)

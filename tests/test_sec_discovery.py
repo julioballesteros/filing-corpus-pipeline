@@ -1,22 +1,22 @@
-"""Tests for SEC submissions retrieval, parsing, and mapping."""
+"""Tests for the shared SEC client and discovery-specific listing policy."""
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 
 import pytest
 
-from filing_corpus_pipeline.adapters.http import HttpTransportError
-from filing_corpus_pipeline.adapters.sec.discovery import SecFilingDiscoverySource
-from filing_corpus_pipeline.adapters.sec.identifiers import normalize_cik
-from filing_corpus_pipeline.adapters.sec.submissions import (
+from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryService
+from filing_corpus_pipeline.discovery.sec import SecFilingDiscoverySource
+from filing_corpus_pipeline.domain import FilingForm, IssuerReference
+from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
+from filing_corpus_pipeline.sources.sec import (
     SEC_DATA_BASE_URL,
-    SecClientConfig,
+    SecEdgarClient,
+    SecEdgarClientConfig,
     SecRequestError,
     SecResponseError,
-    SecSubmissionsClient,
+    normalize_cik,
 )
-from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryService
-from filing_corpus_pipeline.domain import FilingForm, IssuerReference
 
 
 class FakeTransport:
@@ -38,6 +38,17 @@ class FakeTransport:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+    def get_bytes(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout_seconds: float,
+        max_bytes: int,
+    ) -> HttpBytesResponse:
+        del url, headers, timeout_seconds, max_bytes
+        raise AssertionError("discovery must not retrieve filing documents")
 
 
 def columnar_payload(
@@ -80,17 +91,17 @@ def build_client(
     transport: FakeTransport,
     *,
     sleep: Callable[[float], None] = lambda _: None,
-    max_attempts: int = 3,
+    metadata_max_attempts: int = 3,
     request_interval_seconds: float = 0,
-) -> SecSubmissionsClient:
+) -> SecEdgarClient:
     """Build a client with deterministic timing."""
-    return SecSubmissionsClient(
+    return SecEdgarClient(
         transport=transport,
-        config=SecClientConfig(
+        config=SecEdgarClientConfig(
             user_agent="filing-corpus-pipeline contact@example.com",
             timeout_seconds=4.0,
-            max_attempts=max_attempts,
-            initial_backoff_seconds=0.25,
+            metadata_max_attempts=metadata_max_attempts,
+            metadata_initial_backoff_seconds=0.25,
             request_interval_seconds=request_interval_seconds,
         ),
         sleep=sleep,
@@ -171,8 +182,8 @@ def test_sec_source_returns_only_requested_forms_and_dates() -> None:
     assert transport.calls[0][2] == 4.0
 
 
-def test_client_skips_nonoverlapping_historical_files() -> None:
-    """An incremental scan should not retrieve irrelevant history chunks."""
+def test_discovery_skips_nonoverlapping_historical_files() -> None:
+    """The feature listing policy does not retrieve irrelevant history chunks."""
     main_url = f"{SEC_DATA_BASE_URL}/CIK0000320193.json"
     transport = FakeTransport(
         {
@@ -195,13 +206,17 @@ def test_client_skips_nonoverlapping_historical_files() -> None:
         }
     )
 
-    submissions = build_client(transport).list_submissions(
-        "320193",
-        filed_from=date(2026, 1, 1),
-        filed_to=date(2026, 12, 31),
+    service = DiscoveryService(SecFilingDiscoverySource(build_client(transport)))
+    result = service.execute(
+        DiscoveryRequest(
+            issuers=(IssuerReference(provider="sec", provider_issuer_id="320193"),),
+            forms=frozenset({FilingForm.TEN_Q}),
+            filed_from=date(2026, 1, 1),
+            filed_to=date(2026, 12, 31),
+        )
     )
 
-    assert len(submissions) == 1
+    assert len(result.filings) == 1
     assert [call[0] for call in transport.calls] == [main_url]
 
 
@@ -220,13 +235,11 @@ def test_client_retries_transient_transport_errors() -> None:
     )
     sleeps: list[float] = []
 
-    result = build_client(transport, sleep=sleeps.append).list_submissions(
-        "320193",
-        filed_from=date(2026, 1, 1),
-        filed_to=date(2026, 12, 31),
+    result = build_client(transport, sleep=sleeps.append).get_company_submissions(
+        "320193"
     )
 
-    assert result == []
+    assert result.recent == ()
     assert sleeps == [0.25]
     assert len(transport.calls) == 2
 
@@ -254,17 +267,77 @@ def test_client_spaces_sequential_sec_requests() -> None:
     )
     sleeps: list[float] = []
 
-    build_client(
+    client = build_client(
         transport,
         sleep=sleeps.append,
         request_interval_seconds=0.125,
-    ).list_submissions(
-        "320193",
-        filed_from=date(2025, 1, 1),
-        filed_to=date(2025, 12, 31),
+    )
+    company = client.get_company_submissions("320193")
+    client.get_historical_submissions(
+        company.files[0].name,
+        cik=company.cik,
+        issuer_name=company.issuer_name,
     )
 
     assert sleeps == [0.125]
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {
+            "name": "../history.json",
+            "filingFrom": "2025-01-01",
+            "filingTo": "2025-12-31",
+        },
+        {
+            "name": "history.json",
+            "filingFrom": "2025-12-31",
+            "filingTo": "2025-01-01",
+        },
+    ],
+)
+def test_client_rejects_malformed_history_descriptors(
+    descriptor: dict[str, str],
+) -> None:
+    """Invalid SEC history metadata cannot become a follow-up request."""
+    main_url = f"{SEC_DATA_BASE_URL}/CIK0000320193.json"
+    transport = FakeTransport(
+        {
+            main_url: [
+                main_payload(
+                    columnar_payload(accessions=[], forms=[], filing_dates=[]),
+                    files=[descriptor],
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(SecResponseError):
+        build_client(transport).get_company_submissions("320193")
+
+    assert [call[0] for call in transport.calls] == [main_url]
+
+
+@pytest.mark.parametrize(
+    ("file_name", "issuer_name"),
+    [("../history.json", "APPLE INC"), ("history.json", " ")],
+)
+def test_client_rejects_invalid_history_request_identity(
+    file_name: str,
+    issuer_name: str,
+) -> None:
+    """Callers cannot turn a history operation into an arbitrary URL."""
+    transport = FakeTransport({})
+
+    with pytest.raises(ValueError):
+        build_client(transport).get_historical_submissions(
+            file_name,
+            cik="320193",
+            issuer_name=issuer_name,
+        )
+
+    assert transport.calls == []
 
 
 @pytest.mark.parametrize("retryable", [False, True])
@@ -282,11 +355,10 @@ def test_client_surfaces_terminal_request_errors(retryable: bool) -> None:
     )
 
     with pytest.raises(SecRequestError, match="unavailable"):
-        build_client(transport, max_attempts=attempts).list_submissions(
-            "320193",
-            filed_from=date(2026, 1, 1),
-            filed_to=date(2026, 12, 31),
-        )
+        build_client(
+            transport,
+            metadata_max_attempts=attempts,
+        ).get_company_submissions("320193")
 
     assert len(transport.calls) == attempts
 
@@ -340,11 +412,7 @@ def test_client_rejects_malformed_submission_rows(
     transport = FakeTransport({main_url: [main_payload(recent)]})
 
     with pytest.raises(SecResponseError):
-        build_client(transport).list_submissions(
-            "320193",
-            filed_from=date(2026, 1, 1),
-            filed_to=date(2026, 12, 31),
-        )
+        build_client(transport).get_company_submissions("320193")
 
 
 @pytest.mark.parametrize(
@@ -352,12 +420,12 @@ def test_client_rejects_malformed_submission_rows(
     [
         {"user_agent": ""},
         {"user_agent": "agent", "timeout_seconds": 0},
-        {"user_agent": "agent", "max_attempts": 0},
-        {"user_agent": "agent", "initial_backoff_seconds": -1},
+        {"user_agent": "agent", "metadata_max_attempts": 0},
+        {"user_agent": "agent", "metadata_initial_backoff_seconds": -1},
         {"user_agent": "agent", "request_interval_seconds": -1},
     ],
 )
 def test_sec_client_config_rejects_invalid_policy(config: dict[str, object]) -> None:
     """Unsafe or nonsensical HTTP settings fail at composition time."""
     with pytest.raises(ValueError):
-        SecClientConfig(**config)  # type: ignore[arg-type]
+        SecEdgarClientConfig(**config)  # type: ignore[arg-type]

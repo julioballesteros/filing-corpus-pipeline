@@ -26,12 +26,14 @@ from filing_corpus_pipeline.registry import (
     RegistryStatus,
 )
 from filing_corpus_pipeline.registry.service import FilingRegistryService
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.normalized_corpus import (
     NormalizedCorpusWrite,
-    RawObjectStorageError,
     S3NormalizedCorpusClient,
-    S3RawDocumentClient,
     StoredNormalizedCorpus,
+)
+from filing_corpus_pipeline.storage.raw_documents import (
+    RawObjectStorageError,
+    S3RawDocumentClient,
 )
 
 BODY = b"""<html><head><title>Example 10-Q</title></head><body>

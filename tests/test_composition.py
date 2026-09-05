@@ -13,10 +13,11 @@ from filing_corpus_pipeline.normalization import NormalizationService
 from filing_corpus_pipeline.normalization import (
     composition as normalization_composition,
 )
+from filing_corpus_pipeline.runtime import aws as runtime_aws
 
 
 def test_discovery_composition_builds_the_sec_service() -> None:
-    """The discovery entrypoints share one feature-local dependency graph."""
+    """The discovery callers share one feature-local dependency graph."""
     assert isinstance(
         build_sec_discovery_service("pipeline contact@example.com"),
         DiscoveryService,
@@ -33,7 +34,7 @@ def test_discovery_composition_builds_the_s3_target_repository(
         services.append(service_name)
         return object()
 
-    monkeypatch.setattr(discovery_composition, "_aws_client", aws_client)
+    monkeypatch.setattr(discovery_composition, "aws_client", aws_client)
 
     discovery_composition.build_discovery_target_repository()
 
@@ -50,7 +51,7 @@ def test_acquisition_composition_builds_aws_storage_and_sec_source(
         services.append(service_name)
         return object()
 
-    monkeypatch.setattr(acquisition_composition, "_aws_client", aws_client)
+    monkeypatch.setattr(acquisition_composition, "aws_client", aws_client)
 
     service = acquisition_composition.build_sec_acquisition_service(
         user_agent="pipeline contact@example.com",
@@ -81,14 +82,16 @@ def test_acquisition_composition_loads_the_managed_runtime_sdk(
         requested_modules.append(name)
         return module
 
-    monkeypatch.setattr(acquisition_composition, "import_module", import_module)
+    monkeypatch.setattr(runtime_aws, "import_module", import_module)
 
-    assert acquisition_composition._aws_client("s3") is not None
+    assert runtime_aws.aws_client("s3") is not None
     assert requested_modules == ["boto3"]
     assert clients == ["s3"]
 
 
-def test_normalization_composition_shares_one_s3_client() -> None:
+def test_normalization_composition_shares_one_s3_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The normalization graph requests DynamoDB and one low-level S3 client."""
     services: list[str] = []
 
@@ -96,17 +99,13 @@ def test_normalization_composition_shares_one_s3_client() -> None:
         services.append(service_name)
         return object()
 
-    original = normalization_composition._aws_client
-    normalization_composition._aws_client = aws_client
-    try:
-        service = normalization_composition.build_sec_normalization_service(
-            registry_table_name="registry",
-            raw_bucket_name="raw",
-            normalized_bucket_name="normalized",
-            max_document_bytes=1024,
-        )
-    finally:
-        normalization_composition._aws_client = original
+    monkeypatch.setattr(normalization_composition, "aws_client", aws_client)
+    service = normalization_composition.build_sec_normalization_service(
+        registry_table_name="registry",
+        raw_bucket_name="raw",
+        normalized_bucket_name="normalized",
+        max_document_bytes=1024,
+    )
 
     assert isinstance(service, NormalizationService)
     assert services == ["dynamodb", "s3"]

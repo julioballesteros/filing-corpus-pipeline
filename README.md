@@ -39,21 +39,27 @@ filing documents or write pipeline state.
 SEC automated access requires a declared user agent. Use a real monitored
 contact address and do not commit it to the repository.
 
-## Initial code boundaries
+## Code boundaries
 
 - `domain`: provider-neutral filing records passed between pipeline stages.
-- `discovery`: the discovery request, result, provider port, and use case.
+- `discovery`: target loading, SEC listing policy, orchestration, composition,
+  and its Lambda handler.
 - `config/discovery-targets`: source-controlled company identities, regulator
   registrations, and per-registration filing types deployed with the stack.
-- `acquisition`: raw-document retrieval orchestration and its provider contract.
+- `acquisition`: SEC document retrieval policy, raw-document orchestration,
+  composition, and its Lambda handler.
 - `normalization`: deterministic SEC HTML parsing, section classification, data
-  quality findings, and versioned corpus artifact rendering.
-- `adapters/sec`: SEC metadata/document retrieval, response parsing, and record
-  mapping. Future document providers belong beside it.
+  quality findings, versioned corpus artifact rendering, composition, and its
+  Lambda handler.
+- `sources/sec`: the reusable typed SEC EDGAR client, source response models,
+  identifier validation, and canonical endpoint construction.
 - `registry`: filing claim models and the concrete registry service.
-- `storage`: narrow DynamoDB and S3 clients plus SDK serialization details.
-- `entrypoints`: separate thin handlers for discovery, acquisition, and
-  normalization plus the local discovery CLI.
+- `storage`: bounded S3 reads, raw and normalized object persistence, and the
+  DynamoDB client, separated by storage concern.
+- `runtime`: small shared helpers for Lambda environment settings and the AWS
+  SDK supplied by the managed runtime.
+- `cli.py`: the local discovery command; deployed handlers stay beside the
+  features they invoke.
 
 Acquisition and normalization consume `FilingReference` records without
 depending on SEC metadata response formats.
@@ -68,7 +74,7 @@ remain frozen dataclasses; they do not need runtime schema machinery.
 Configure the Lambda handler as:
 
 ```text
-filing_corpus_pipeline.entrypoints.discovery_lambda.handler
+filing_corpus_pipeline.discovery.handler.handler
 ```
 
 The parent workflow invokes it with an explicit, replayable date range and the
@@ -122,7 +128,7 @@ registration identity, target versioning, deployment, and change procedures.
 Each Step Functions `Map` iteration invokes the dedicated acquisition handler:
 
 ```text
-filing_corpus_pipeline.entrypoints.acquisition_lambda.handler
+filing_corpus_pipeline.acquisition.handler.handler
 ```
 
 Its event contains one discovery record, the workflow execution ARN used as the
@@ -136,10 +142,11 @@ claim owner, and the Task entry time used to start the lease:
 }
 ```
 
-Feature-specific composition lives in `discovery/composition.py` and
-the corresponding `acquisition` and `normalization` packages; the handlers only
-validate runtime input and configuration, call their service, log the bounded
-result, and serialize it.
+Each feature package owns its handler, input translation, source-specific
+policy, composition root, and application service. Handlers remain thin: they
+validate runtime input and configuration, invoke the service, log the bounded
+result, and serialize it. Shared SEC HTTP mechanics do not import feature or
+pipeline-domain models.
 
 ## Lambda normalization contract
 
@@ -147,7 +154,7 @@ After acquisition reports `RAW_STORED` or `ALREADY_COMPLETED`, the same Map
 iteration invokes:
 
 ```text
-filing_corpus_pipeline.entrypoints.normalization_lambda.handler
+filing_corpus_pipeline.normalization.handler.handler
 ```
 
 It receives the same provider-neutral filing record, workflow owner, and Task

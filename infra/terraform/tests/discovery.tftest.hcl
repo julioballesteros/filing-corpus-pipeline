@@ -136,7 +136,7 @@ run "default_ingestion_slice" {
   assert {
     condition = (
       aws_lambda_function.discovery.handler ==
-      "filing_corpus_pipeline.entrypoints.discovery_lambda.handler"
+      "filing_corpus_pipeline.discovery.handler.handler"
     )
     error_message = "The Lambda must use the discovery handler."
   }
@@ -144,7 +144,7 @@ run "default_ingestion_slice" {
   assert {
     condition = (
       aws_lambda_function.acquisition.handler ==
-      "filing_corpus_pipeline.entrypoints.acquisition_lambda.handler"
+      "filing_corpus_pipeline.acquisition.handler.handler"
     )
     error_message = "The acquisition Lambda must have its own explicit handler."
   }
@@ -152,7 +152,7 @@ run "default_ingestion_slice" {
   assert {
     condition = (
       aws_lambda_function.normalization.handler ==
-      "filing_corpus_pipeline.entrypoints.normalization_lambda.handler"
+      "filing_corpus_pipeline.normalization.handler.handler"
     )
     error_message = "The normalization Lambda must have its own explicit handler."
   }

@@ -25,11 +25,13 @@ from filing_corpus_pipeline.registry import (
     NormalizedCorpusMetadata,
     filing_registry_key,
 )
-from filing_corpus_pipeline.storage import (
+from filing_corpus_pipeline.storage.normalized_corpus import (
     NormalizedCorpusWrite,
     NormalizedObjectStorageError,
-    RawObjectStorageError,
     S3NormalizedCorpusClient,
+)
+from filing_corpus_pipeline.storage.raw_documents import (
+    RawObjectStorageError,
     S3RawDocumentClient,
 )
 

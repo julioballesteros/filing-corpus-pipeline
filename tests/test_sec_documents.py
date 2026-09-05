@@ -5,12 +5,13 @@ from datetime import date
 import pytest
 
 from filing_corpus_pipeline.acquisition import DocumentRetrievalError
-from filing_corpus_pipeline.adapters.http import HttpBytesResponse, HttpTransportError
-from filing_corpus_pipeline.adapters.sec.documents import (
+from filing_corpus_pipeline.acquisition.sec import (
     SecDocumentConfig,
     SecFilingDocumentSource,
 )
 from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
+from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
 
 
 class StubBytesTransport:
@@ -39,6 +40,16 @@ class StubBytesTransport:
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout_seconds: float,
+    ) -> object:
+        del url, headers, timeout_seconds
+        raise AssertionError("acquisition must not retrieve submission metadata")
 
 
 def filing_reference() -> FilingReference:
@@ -71,12 +82,15 @@ def source(
     transport = StubBytesTransport(result)
     return (
         SecFilingDocumentSource(
-            transport=transport,
-            config=SecDocumentConfig(
-                user_agent="filing-corpus test@example.com",
-                timeout_seconds=4,
-                max_document_bytes=100,
+            client=SecEdgarClient(
+                transport=transport,
+                config=SecEdgarClientConfig(
+                    user_agent="filing-corpus test@example.com",
+                    timeout_seconds=4,
+                    request_interval_seconds=0,
+                ),
             ),
+            config=SecDocumentConfig(max_document_bytes=100),
         ),
         transport,
     )
@@ -84,7 +98,7 @@ def source(
 
 def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
     """Identity-derived URLs, access identity, and bounds reach the transport."""
-    adapter, transport = source(
+    document_source, transport = source(
         HttpBytesResponse(
             b"<html>filing</html>",
             "text/html",
@@ -93,7 +107,7 @@ def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
         )
     )
 
-    result = adapter.retrieve(filing_reference())
+    result = document_source.retrieve(filing_reference())
 
     assert result.body == b"<html>filing</html>"
     assert result.source_etag == '"source-etag"'
@@ -134,10 +148,12 @@ def test_sec_source_rejects_inconsistent_identity_before_http(
     code: str,
 ) -> None:
     """Workflow input cannot redirect the acquisition worker to another host."""
-    adapter, transport = source(HttpBytesResponse(b"body", "text/html", None, None))
+    document_source, transport = source(
+        HttpBytesResponse(b"body", "text/html", None, None)
+    )
 
     with pytest.raises(DocumentRetrievalError) as raised:
-        adapter.retrieve(filing)
+        document_source.retrieve(filing)
 
     assert raised.value.code == code
     assert raised.value.retryable is False
@@ -145,12 +161,12 @@ def test_sec_source_rejects_inconsistent_identity_before_http(
 
 
 def test_sec_source_rejects_a_different_provider() -> None:
-    """The SEC adapter never consumes another provider's record."""
+    """The SEC source never consumes another provider's record."""
     other = filing_reference().model_copy(update={"provider": "other"})
-    adapter, _ = source(HttpBytesResponse(b"body", "text/html", None, None))
+    document_source, _ = source(HttpBytesResponse(b"body", "text/html", None, None))
 
     with pytest.raises(DocumentRetrievalError) as raised:
-        adapter.retrieve(other)
+        document_source.retrieve(other)
 
     assert raised.value.code == "SEC_PROVIDER_MISMATCH"
 
@@ -176,10 +192,10 @@ def test_sec_source_translates_transport_failures(
     retryable: bool,
 ) -> None:
     """Provider failures use stable registry codes and retain retry policy."""
-    adapter, _ = source(transport_error)
+    document_source, _ = source(transport_error)
 
     with pytest.raises(DocumentRetrievalError) as raised:
-        adapter.retrieve(filing_reference())
+        document_source.retrieve(filing_reference())
 
     assert raised.value.code == code
     assert raised.value.retryable is retryable
@@ -187,25 +203,15 @@ def test_sec_source_translates_transport_failures(
 
 def test_sec_source_rejects_empty_success() -> None:
     """A successful status with no bytes cannot become corpus provenance."""
-    adapter, _ = source(HttpBytesResponse(b"", "text/html", None, None))
+    document_source, _ = source(HttpBytesResponse(b"", "text/html", None, None))
 
     with pytest.raises(DocumentRetrievalError) as raised:
-        adapter.retrieve(filing_reference())
+        document_source.retrieve(filing_reference())
 
     assert raised.value.code == "SEC_EMPTY_DOCUMENT"
 
 
-@pytest.mark.parametrize(
-    "config",
-    [
-        {"user_agent": ""},
-        {"user_agent": "ua", "timeout_seconds": 0},
-        {"user_agent": "ua", "max_document_bytes": 0},
-    ],
-)
-def test_sec_document_config_rejects_unbounded_values(
-    config: dict[str, object],
-) -> None:
+def test_sec_document_config_rejects_an_unbounded_size() -> None:
     """Invalid runtime limits fail during composition."""
     with pytest.raises(ValueError):
-        SecDocumentConfig(**config)  # type: ignore[arg-type]
+        SecDocumentConfig(max_document_bytes=0)
