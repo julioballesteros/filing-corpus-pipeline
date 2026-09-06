@@ -18,6 +18,7 @@ from filing_corpus_pipeline.discovery.target_repository import (
     InvalidDiscoveryTargetError,
     RetryableDiscoveryTargetError,
 )
+from filing_corpus_pipeline.domain import FilingSelection
 from filing_corpus_pipeline.storage.s3 import S3ObjectClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,7 +75,7 @@ class AwsError(Exception):
 
 def target_payload() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "target_set_id": "portfolio-core",
         "revision": 1,
         "companies": [
@@ -85,7 +86,16 @@ def target_payload() -> dict[str, object]:
                     {
                         "regulator": "sec",
                         "issuer_id": "0000320193",
-                        "filing_types": ["10-K", "10-Q"],
+                        "filings": [
+                            {
+                                "filing_type": "10-K",
+                                "document_policy": "primary",
+                            },
+                            {
+                                "filing_type": "10-Q",
+                                "document_policy": "primary",
+                            },
+                        ],
                     }
                 ],
             }
@@ -135,6 +145,41 @@ def test_repository_loads_and_validates_one_exact_object_version() -> None:
         }
     ]
     assert stream.read_amounts == [256 * 1024 + 1]
+
+
+def test_repository_upgrades_a_pinned_schema_v1_manifest_for_replay() -> None:
+    payload = target_payload()
+    payload["schema_version"] = 1
+    companies = payload["companies"]
+    assert isinstance(companies, list)
+    company = companies[0]
+    assert isinstance(company, dict)
+    registrations = company["registrations"]
+    assert isinstance(registrations, list)
+    registration = registrations[0]
+    assert isinstance(registration, dict)
+    registration.pop("filings")
+    registration["filing_types"] = ["10-K", "10-Q"]
+    body = json.dumps(payload).encode()
+    targets, _ = repository({"ContentLength": len(body), "Body": BodyStream(body)})
+
+    result = targets.load(reference(body))
+
+    assert result.schema_version == 1
+    assert [
+        (selection.filing_type, selection.document_policy.value)
+        for selection in result.companies[0].registrations[0].filings
+    ] == [("10-K", "primary"), ("10-Q", "primary")]
+
+
+def test_repository_rejects_v2_fields_mislabeled_as_schema_v1() -> None:
+    payload = target_payload()
+    payload["schema_version"] = 1
+    body = json.dumps(payload).encode()
+    targets, _ = repository({"ContentLength": len(body), "Body": BodyStream(body)})
+
+    with pytest.raises(InvalidDiscoveryTargetError, match="must use filing_types"):
+        targets.load(reference(body))
 
 
 def test_repository_rejects_an_integrity_mismatch() -> None:
@@ -206,7 +251,7 @@ def test_repository_requires_a_positive_size_bound() -> None:
     "body",
     [
         b"not-json",
-        json.dumps({**target_payload(), "schema_version": 2}).encode(),
+        json.dumps({**target_payload(), "schema_version": 3}).encode(),
         json.dumps({**target_payload(), "unexpected": True}).encode(),
     ],
 )
@@ -242,12 +287,12 @@ def test_target_set_rejects_cross_company_registration_collisions() -> None:
     registration = RegulatorRegistration(
         regulator="sec",
         issuer_id="0000320193",
-        filing_types=("10-K",),
+        filings=(FilingSelection(filing_type="10-K"),),
     )
 
     with pytest.raises(ValueError, match="exactly one company"):
         DiscoveryTargetSet(
-            schema_version=1,
+            schema_version=2,
             target_set_id="portfolio-core",
             revision=1,
             companies=(
@@ -288,31 +333,44 @@ def test_target_set_versions_require_json_integers(field: str, value: object) ->
         {
             "regulator": "SEC",
             "issuer_id": "0000320193",
-            "filing_types": ["10-K"],
+            "filings": [{"filing_type": "10-K"}],
         },
         {
             "regulator": "sec regulator",
             "issuer_id": "0000320193",
-            "filing_types": ["10-K"],
+            "filings": [{"filing_type": "10-K"}],
         },
         {
             "regulator": "sec",
             "issuer_id": " 0000320193",
-            "filing_types": ["10-K"],
+            "filings": [{"filing_type": "10-K"}],
         },
         {
             "regulator": "sec",
             "issuer_id": "0000320193",
-            "filing_types": ["10-K", "10-K"],
+            "filings": [
+                {"filing_type": "10-K"},
+                {"filing_type": "10-K"},
+            ],
         },
         {
             "regulator": "sec",
             "issuer_id": "0000320193",
-            "filing_types": [" 10-K"],
+            "filings": [{"filing_type": " 10-K"}],
+        },
+        {
+            "regulator": "sec",
+            "issuer_id": "0000320193",
+            "filings": [
+                {
+                    "filing_type": "8-K",
+                    "document_policy": "earnings-release",
+                }
+            ],
         },
     ],
 )
-def test_registration_identity_and_filing_types_are_canonical(
+def test_registration_identity_and_filing_selections_are_canonical(
     registration: dict[str, object],
 ) -> None:
     with pytest.raises(ValueError):
@@ -333,7 +391,7 @@ def test_source_controlled_development_target_set_matches_the_schema() -> None:
         if path.name == "dev.json"
     )
 
-    assert all(targets.schema_version == 1 for targets in target_sets)
+    assert all(targets.schema_version == 2 for targets in target_sets)
     assert {company.company_id for company in development_targets.companies} == {
         "apple-inc",
         "microsoft-corp",

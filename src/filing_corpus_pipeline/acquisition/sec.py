@@ -6,7 +6,7 @@ from filing_corpus_pipeline.acquisition.models import (
     DocumentRetrievalError,
     RetrievedDocument,
 )
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import DocumentPolicy, FilingReference
 from filing_corpus_pipeline.sources.sec import (
     SecEdgarClient,
     SecRequestError,
@@ -42,6 +42,12 @@ class SecFilingDocumentSource:
 
     def retrieve(self, filing: FilingReference) -> RetrievedDocument:
         """Validate SEC identity fields and retrieve the bounded source bytes."""
+        if filing.document_policy is not DocumentPolicy.PRIMARY:
+            raise DocumentRetrievalError(
+                "SEC acquisition requires a resolved primary-document policy",
+                code="SEC_UNSUPPORTED_DOCUMENT_POLICY",
+                retryable=False,
+            )
         url = _canonical_document_url(filing)
         if filing.primary_document_url != url:
             raise DocumentRetrievalError(

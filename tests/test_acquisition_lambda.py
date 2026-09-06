@@ -12,7 +12,7 @@ from filing_corpus_pipeline.acquisition import (
 )
 from filing_corpus_pipeline.acquisition import handler as acquisition_handler
 from filing_corpus_pipeline.acquisition.handler import InvalidAcquisitionEvent
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
@@ -37,11 +37,12 @@ class CapturingAcquisitionService:
 def filing_reference() -> FilingReference:
     """Build a complete workflow filing record."""
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="0000320193-25-000079",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=date(2025, 6, 28),
         accepted_at=datetime(2025, 8, 1, 16, 30, tzinfo=UTC),

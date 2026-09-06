@@ -1,8 +1,8 @@
 # Raw filing acquisition contract
 
-Acquisition turns one provider-neutral `FilingReference` into a durable,
-integrity-checked source object. Terraform deploys it as a dedicated Lambda
-invoked once per filing by a bounded Step Functions `Map`.
+Acquisition turns one provider-neutral, already-resolved `FilingReference` into
+a durable, integrity-checked source object. Terraform deploys it as a dedicated
+Lambda invoked once per filing by a bounded Step Functions `Map`.
 
 ## One invocation
 
@@ -42,6 +42,12 @@ and caps the response at 25 MiB by default.
 Adding a provider means implementing this retrieval contract beside `sec` and
 registering it during runtime composition. It does not require changing S3 or
 registry policy.
+
+The current SEC source accepts only the `primary` document policy. It does not
+infer exhibit semantics from a filing type. Non-primary policies such as a
+future 8-K earnings release require a source-specific document resolver before
+this boundary; acquisition then remains responsible only for validating and
+downloading the resolved document.
 
 ## Object identity and idempotency
 

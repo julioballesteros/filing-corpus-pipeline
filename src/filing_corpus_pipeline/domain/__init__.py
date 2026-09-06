@@ -1,9 +1,15 @@
 """Domain models shared across pipeline stages."""
 
 from filing_corpus_pipeline.domain.filings import (
-    FilingForm,
+    DocumentPolicy,
     FilingReference,
+    FilingSelection,
     IssuerReference,
 )
 
-__all__ = ["FilingForm", "FilingReference", "IssuerReference"]
+__all__ = [
+    "DocumentPolicy",
+    "FilingReference",
+    "FilingSelection",
+    "IssuerReference",
+]

@@ -12,10 +12,11 @@ from filing_corpus_pipeline.discovery import (
     DiscoveryTargetSet,
     DiscoveryWindow,
     RegulatorRegistration,
+    discovery_request,
 )
 from filing_corpus_pipeline.discovery import handler as discovery_handler
 from filing_corpus_pipeline.discovery.handler import InvalidDiscoveryEvent
-from filing_corpus_pipeline.domain import FilingForm
+from filing_corpus_pipeline.domain import FilingSelection
 from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
 
@@ -23,16 +24,13 @@ class CapturingService:
     """Capture application inputs without reaching the SEC endpoint."""
 
     def __init__(self) -> None:
-        self.requests: tuple[DiscoveryRequest, ...] | None = None
+        self.request: DiscoveryRequest | None = None
 
-    def execute_many(
-        self,
-        requests: tuple[DiscoveryRequest, ...],
-    ) -> DiscoveryResult:
-        self.requests = requests
+    def execute(self, request: DiscoveryRequest) -> DiscoveryResult:
+        self.request = request
         return DiscoveryResult(
             filings=(),
-            issuers_scanned=sum(len(request.issuers) for request in requests),
+            issuers_scanned=len(request.targets),
         )
 
 
@@ -59,7 +57,7 @@ def target_reference() -> DiscoveryTargetReference:
 
 def target_set() -> DiscoveryTargetSet:
     return DiscoveryTargetSet(
-        schema_version=1,
+        schema_version=2,
         target_set_id="portfolio-core",
         revision=3,
         companies=(
@@ -70,7 +68,10 @@ def target_set() -> DiscoveryTargetSet:
                     RegulatorRegistration(
                         regulator="sec",
                         issuer_id="0000320193",
-                        filing_types=("10-K", "10-Q"),
+                        filings=(
+                            FilingSelection(filing_type="10-K"),
+                            FilingSelection(filing_type="10-Q"),
+                        ),
                     ),
                 ),
             ),
@@ -81,7 +82,7 @@ def target_set() -> DiscoveryTargetSet:
                     RegulatorRegistration(
                         regulator="sec",
                         issuer_id="0000789019",
-                        filing_types=("10-Q",),
+                        filings=(FilingSelection(filing_type="10-Q"),),
                     ),
                 ),
             ),
@@ -106,20 +107,12 @@ def test_handler_loads_targets_and_executes_per_registration_discovery(
     """The Lambda resolves deployed targets separately from its time window."""
     service = CapturingService()
     repository = StubTargetRepository(target_set())
-    user_agents: list[str] = []
-
-    def build_service(user_agent: str) -> CapturingService:
-        user_agents.append(user_agent)
-        return service
-
-    monkeypatch.setattr(discovery_handler, "build_sec_discovery_service", build_service)
+    monkeypatch.setattr(discovery_handler, "build_discovery_service", lambda: service)
     monkeypatch.setattr(
         discovery_handler,
         "build_discovery_target_repository",
         lambda: repository,
     )
-    monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
-
     result = discovery_handler.handler(valid_event(), object())
 
     assert result == {
@@ -129,23 +122,24 @@ def test_handler_loads_targets_and_executes_per_registration_discovery(
         "target_set": {
             "target_set_id": "portfolio-core",
             "revision": 3,
-            "schema_version": 1,
+            "schema_version": 2,
             "bucket": "target-config",
             "key": "discovery-targets/dev.json",
             "version_id": "version-1",
             "sha256": "a" * 64,
         },
     }
-    assert user_agents == ["pipeline contact@example.com"]
     assert repository.reference == target_reference()
-    assert service.requests is not None
-    assert [request.issuers[0].provider_issuer_id for request in service.requests] == [
+    assert service.request is not None
+    assert [target.issuer.provider_issuer_id for target in service.request.targets] == [
         "0000320193",
         "0000789019",
     ]
-    assert service.requests[0].forms == frozenset(FilingForm)
-    assert service.requests[1].forms == frozenset({FilingForm.TEN_Q})
-    assert all(request.filed_from == date(2025, 1, 1) for request in service.requests)
+    assert [
+        selection.filing_type for selection in service.request.targets[0].selections
+    ] == ["10-K", "10-Q"]
+    assert service.request.targets[1].company_id == "microsoft-corp"
+    assert service.request.filed_from == date(2025, 1, 1)
 
 
 def test_handler_requires_sec_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -261,10 +255,10 @@ def test_parser_rejects_invalid_lookback_days(lookback_days: object) -> None:
         discovery_handler.parse_discovery_event(event)
 
 
-def test_sec_request_translation_rejects_an_unsupported_regulator() -> None:
-    """Additional regulator targets wait for the future source registry."""
+def test_target_translation_preserves_source_specific_values() -> None:
+    """The handler-side translation does not interpret source filing codes."""
     targets = DiscoveryTargetSet(
-        schema_version=1,
+        schema_version=2,
         target_set_id="portfolio-core",
         revision=1,
         companies=(
@@ -275,49 +269,20 @@ def test_sec_request_translation_rejects_an_unsupported_regulator() -> None:
                     RegulatorRegistration(
                         regulator="fca",
                         issuer_id="213800EXAMPLE",
-                        filing_types=("annual-report",),
+                        filings=(FilingSelection(filing_type="annual-report"),),
                     ),
                 ),
             ),
         ),
     )
 
-    with pytest.raises(InvalidDiscoveryEvent, match=r"unsupported.*fca"):
-        discovery_handler._sec_discovery_requests(
-            targets,
-            DiscoveryWindow(
-                filed_from=date(2025, 1, 1),
-                filed_to=date(2025, 1, 2),
-            ),
-        )
-
-
-def test_sec_request_translation_rejects_an_unsupported_filing_type() -> None:
-    """The target schema stays generic while this runtime remains 10-K/10-Q only."""
-    targets = DiscoveryTargetSet(
-        schema_version=1,
-        target_set_id="portfolio-core",
-        revision=1,
-        companies=(
-            DiscoveryCompany(
-                company_id="apple-inc",
-                display_name="Apple Inc.",
-                registrations=(
-                    RegulatorRegistration(
-                        regulator="sec",
-                        issuer_id="0000320193",
-                        filing_types=("8-K",),
-                    ),
-                ),
-            ),
+    request = discovery_request(
+        targets,
+        DiscoveryWindow(
+            filed_from=date(2025, 1, 1),
+            filed_to=date(2025, 1, 2),
         ),
     )
 
-    with pytest.raises(InvalidDiscoveryEvent, match="unsupported SEC filing type"):
-        discovery_handler._sec_discovery_requests(
-            targets,
-            DiscoveryWindow(
-                filed_from=date(2025, 1, 1),
-                filed_to=date(2025, 1, 2),
-            ),
-        )
+    assert request.targets[0].issuer.provider == "fca"
+    assert request.targets[0].selections[0].filing_type == "annual-report"

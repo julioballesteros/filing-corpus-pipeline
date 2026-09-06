@@ -42,10 +42,11 @@ contact address and do not commit it to the repository.
 ## Code boundaries
 
 - `domain`: provider-neutral filing records passed between pipeline stages.
-- `discovery`: target loading, SEC listing policy, orchestration, composition,
-  and its Lambda handler.
+- `discovery`: target loading, source-neutral routing and orchestration,
+  source-specific listing policy, composition, and its Lambda handler.
 - `config/discovery-targets`: source-controlled company identities, regulator
-  registrations, and per-registration filing types deployed with the stack.
+  registrations, and per-registration filing selections deployed with the
+  stack.
 - `acquisition`: SEC document retrieval policy, raw-document orchestration,
   composition, and its Lambda handler.
 - `normalization`: deterministic SEC HTML parsing, section classification, data
@@ -96,12 +97,21 @@ exact version of the deployed target manifest:
 ```
 
 The target manifest contains stable internal company IDs and one or more
-regulator registrations per company. Filing types belong to a registration, so
-two companies or two regulators need not share a form selection. Discovery is
-still SEC-only in this release; a configured non-SEC regulator fails explicitly
-until regulator source routing is introduced. The Lambda environment must
+regulator registrations per company. Filing selections belong to a
+registration, so two companies or two regulators need not share filing types or
+document policies. The service already routes targets through a provider
+registry; the deployed runtime currently registers only SEC and deliberately
+supports `10-K`/`primary` and `10-Q`/`primary`. The Lambda environment must
 contain `SEC_USER_AGENT` with a declared application name and monitored contact
 address.
+
+Filing type codes are regulator-qualified strings, while document policies are
+closed capabilities implemented by the pipeline. This distinction leaves
+discovery extensible without pretending that downstream processing exists. A
+future SEC earnings-release route will be expressed as `8-K` plus an
+`earnings-release` document policy and resolved to the appropriate exhibit
+before acquisition; it will not treat every 8-K or EX-99.1 as an earnings
+release.
 
 For recurring runs, EventBridge Scheduler supplies only its execution time and
 the global rolling-window policy:
@@ -136,7 +146,21 @@ claim owner, and the Task entry time used to start the lease:
 
 ```json
 {
-  "filing": { "provider": "sec", "provider_filing_id": "..." },
+  "filing": {
+    "company_id": "apple-inc",
+    "provider": "sec",
+    "provider_filing_id": "0000320193-25-000079",
+    "provider_issuer_id": "0000320193",
+    "issuer_name": "Apple Inc.",
+    "filing_type": "10-Q",
+    "document_policy": "primary",
+    "filed_on": "2025-08-01",
+    "report_date": "2025-06-28",
+    "accepted_at": "2025-08-01T16:30:00Z",
+    "primary_document": "aapl-20250628.htm",
+    "filing_detail_url": "https://www.sec.gov/Archives/...-index.html",
+    "primary_document_url": "https://www.sec.gov/Archives/.../aapl-20250628.htm"
+  },
   "owner_id": "arn:aws:states:...:execution:...",
   "requested_at": "2025-08-01T18:00:00Z"
 }

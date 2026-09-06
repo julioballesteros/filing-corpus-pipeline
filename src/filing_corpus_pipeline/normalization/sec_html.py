@@ -4,12 +4,13 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
+from enum import StrEnum
 from hashlib import sha256
 
 from lxml import etree, html
 from lxml.html import HtmlElement
 
-from filing_corpus_pipeline.domain import FilingForm
+from filing_corpus_pipeline.domain import DocumentPolicy
 from filing_corpus_pipeline.normalization.models import (
     NORMALIZATION_SCHEMA_VERSION,
     SEC_HTML_PARSER_VERSION,
@@ -23,6 +24,14 @@ from filing_corpus_pipeline.normalization.models import (
     RawFilingDocument,
     SecHtmlParserConfig,
 )
+
+
+class _SecFilingType(StrEnum):
+    """SEC filing types with an implemented classification profile."""
+
+    TEN_K = "10-K"
+    TEN_Q = "10-Q"
+
 
 _BLOCK_TAGS = frozenset(
     {
@@ -87,7 +96,7 @@ _TEN_K_SECTIONS = {
     ("IV", "16"): "form_10k_summary",
 }
 _ITEM_TITLES = {
-    FilingForm.TEN_K: {
+    _SecFilingType.TEN_K: {
         ("I", "1"): ("business",),
         ("I", "1A"): ("risk factors",),
         ("I", "1B"): ("unresolved staff comments",),
@@ -141,7 +150,7 @@ _ITEM_TITLES = {
         ),
         ("IV", "16"): ("form 10 k summary",),
     },
-    FilingForm.TEN_Q: {
+    _SecFilingType.TEN_Q: {
         ("I", "1"): ("financial statements",),
         ("I", "2"): (
             "managements discussion and analysis",
@@ -176,14 +185,14 @@ _TEN_Q_SECTIONS = {
     ("II", "6"): "exhibits",
 }
 _EXPECTED_SECTIONS = {
-    FilingForm.TEN_K: frozenset(
+    _SecFilingType.TEN_K: frozenset(
         {
             "financial_statements",
             "management_discussion_and_analysis",
             "risk_factors",
         }
     ),
-    FilingForm.TEN_Q: frozenset(
+    _SecFilingType.TEN_Q: frozenset(
         {"financial_statements", "management_discussion_and_analysis"}
     ),
 }
@@ -220,6 +229,23 @@ class SecHtmlNormalizer:
 
     def normalize(self, source: RawFilingDocument) -> NormalizedDocument:
         """Parse, classify, and validate one raw filing without external I/O."""
+        if source.filing.provider != "sec":
+            raise DocumentParseError(
+                f"SEC normalizer cannot process provider {source.filing.provider!r}",
+                code="UNSUPPORTED_PROVIDER",
+            )
+        if source.filing.document_policy is not DocumentPolicy.PRIMARY:
+            raise DocumentParseError(
+                "SEC normalizer requires a resolved primary document",
+                code="UNSUPPORTED_DOCUMENT_POLICY",
+            )
+        try:
+            filing_type = _SecFilingType(source.filing.filing_type)
+        except ValueError as error:
+            raise DocumentParseError(
+                f"unsupported SEC filing type: {source.filing.filing_type!r}",
+                code="UNSUPPORTED_SEC_FILING_TYPE",
+            ) from error
         if not source.body:
             raise DocumentParseError(
                 "source document is empty",
@@ -245,7 +271,7 @@ class SecHtmlNormalizer:
         self._remove_non_content(root)
         title = (
             self._title(root)
-            or f"{source.filing.issuer_name} {source.filing.form.value}"
+            or f"{source.filing.issuer_name} {source.filing.filing_type}"
         )
         extracted = self._extract_blocks(root)
         if not extracted:
@@ -254,9 +280,9 @@ class SecHtmlNormalizer:
                 code="NO_CONTENT_BLOCKS",
             )
 
-        blocks, warnings = self._classify_blocks(extracted, source.filing.form)
+        blocks, warnings = self._classify_blocks(extracted, filing_type)
         sections = self._summarize_sections(blocks)
-        warnings.extend(self._quality_warnings(blocks, source.filing.form))
+        warnings.extend(self._quality_warnings(blocks, filing_type))
 
         return NormalizedDocument(
             filing_key=source.filing_key,
@@ -388,7 +414,7 @@ class SecHtmlNormalizer:
 
     @staticmethod
     def _classify_blocks(
-        extracted: list[_ExtractedBlock], form: FilingForm
+        extracted: list[_ExtractedBlock], form: _SecFilingType
     ) -> tuple[list[DocumentBlock], list[ParseWarning]]:
         blocks: list[DocumentBlock] = []
         warnings: list[ParseWarning] = []
@@ -475,7 +501,7 @@ class SecHtmlNormalizer:
         ]
 
     def _quality_warnings(
-        self, blocks: list[DocumentBlock], form: FilingForm
+        self, blocks: list[DocumentBlock], form: _SecFilingType
     ) -> list[ParseWarning]:
         warnings: list[ParseWarning] = []
         text_length = sum(len(block.text) for block in blocks)
@@ -582,7 +608,7 @@ def _part_heading_match(value: _ExtractedBlock) -> re.Match[str] | None:
 
 def _item_heading_match(
     value: _ExtractedBlock,
-    form: FilingForm,
+    form: _SecFilingType,
     part: str | None,
 ) -> re.Match[str] | None:
     if (
@@ -606,7 +632,7 @@ def _item_heading_match(
 
 
 def _matches_item_title(
-    form: FilingForm,
+    form: _SecFilingType,
     part: str | None,
     item: str,
     title: str,
@@ -730,6 +756,6 @@ def _item_section_id(part: str | None, item: str) -> str:
     return f"part-{part_segment}-item-{item.lower()}"
 
 
-def _canonical_section(form: FilingForm, part: str | None, item: str) -> str:
-    mappings = _TEN_K_SECTIONS if form is FilingForm.TEN_K else _TEN_Q_SECTIONS
+def _canonical_section(form: _SecFilingType, part: str | None, item: str) -> str:
+    mappings = _TEN_K_SECTIONS if form is _SecFilingType.TEN_K else _TEN_Q_SECTIONS
     return mappings.get((part or "", item), f"item_{item.lower()}")

@@ -18,7 +18,7 @@ from filing_corpus_pipeline.registry.models import (
     RawDocumentMetadata,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 AttributeValue = dict[str, object]
 DynamoItem = Mapping[str, object]
@@ -461,11 +461,13 @@ def _raise_storage_error(error: Exception, *, operation: str) -> NoReturn:
 
 def _claim_update_expression() -> str:
     metadata_fields = (
+        "company_id",
         "provider",
         "provider_filing_id",
         "provider_issuer_id",
         "issuer_name",
-        "form",
+        "filing_type",
+        "document_policy",
         "filed_on",
         "report_date",
         "accepted_at",
@@ -495,11 +497,13 @@ def _claim_update_expression() -> str:
 def _claim_attribute_names() -> dict[str, str]:
     fields = (
         "filing_key",
+        "company_id",
         "provider",
         "provider_filing_id",
         "provider_issuer_id",
         "issuer_name",
-        "form",
+        "filing_type",
+        "document_policy",
         "filed_on",
         "report_date",
         "accepted_at",
@@ -526,11 +530,13 @@ def _claim_attribute_values(request: ClaimRequest) -> dict[str, AttributeValue]:
     filing = request.filing
     claimed_at = _timestamp(request.claimed_at)
     return {
+        ":company_id": _string(filing.company_id),
         ":provider": _string(filing.provider),
         ":provider_filing_id": _string(filing.provider_filing_id),
         ":provider_issuer_id": _string(filing.issuer.provider_issuer_id),
         ":issuer_name": _string(filing.issuer_name),
-        ":form": _string(filing.form.value),
+        ":filing_type": _string(filing.filing_type),
+        ":document_policy": _string(filing.document_policy.value),
         ":filed_on": _string(filing.filed_on.isoformat()),
         ":report_date": _optional_string(
             filing.report_date.isoformat() if filing.report_date is not None else None

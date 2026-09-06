@@ -14,8 +14,8 @@ from filing_corpus_pipeline.models import (
 )
 from filing_corpus_pipeline.registry.models import NormalizedCorpusMetadata
 
-NORMALIZATION_SCHEMA_VERSION = "1"
-SEC_HTML_PARSER_VERSION = "sec-html-v2"
+NORMALIZATION_SCHEMA_VERSION = "2"
+SEC_HTML_PARSER_VERSION = "sec-html-v3"
 
 
 class BlockType(StrEnum):

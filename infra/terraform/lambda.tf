@@ -5,7 +5,7 @@ resource "aws_cloudwatch_log_group" "discovery_lambda" {
 
 resource "aws_lambda_function" "discovery" {
   function_name = local.discovery_lambda_function_name
-  description   = "Discovers new SEC 10-K and 10-Q filing references."
+  description   = "Routes configured targets and discovers supported filing references."
   role          = aws_iam_role.discovery_lambda.arn
 
   filename         = local.discovery_lambda_package_path

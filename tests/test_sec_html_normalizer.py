@@ -8,7 +8,7 @@ import pytest
 from lxml import etree
 from lxml import html as lxml_html
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.normalization import (
     BlockType,
     DocumentParseError,
@@ -21,13 +21,14 @@ from filing_corpus_pipeline.normalization import (
 _FIXTURES = Path(__file__).parent / "fixtures" / "sec"
 
 
-def _filing(form: FilingForm) -> FilingReference:
+def _filing(filing_type: str) -> FilingReference:
     return FilingReference(
+        company_id="example-issuer",
         provider="sec",
         provider_filing_id="0000000000-25-000001",
         provider_issuer_id="0000000000",
         issuer_name="Example Issuer",
-        form=form,
+        filing_type=filing_type,
         filed_on=date(2025, 4, 30),
         report_date=date(2025, 3, 31),
         accepted_at=None,
@@ -40,12 +41,12 @@ def _filing(form: FilingForm) -> FilingReference:
 def _source(
     body: bytes,
     *,
-    form: FilingForm = FilingForm.TEN_Q,
+    filing_type: str = "10-Q",
     expected_sha256: str | None = None,
 ) -> RawFilingDocument:
     return RawFilingDocument(
         filing_key="sec#0000000000-25-000001",
-        filing=_filing(form),
+        filing=_filing(filing_type),
         body=body,
         content_type="text/html; charset=utf-8",
         expected_sha256=expected_sha256,
@@ -117,7 +118,7 @@ def test_preserves_table_structure_and_visible_inline_xbrl_fact() -> None:
 
 def test_classifies_part_specific_10k_sections_and_keeps_html_header() -> None:
     body = (_FIXTURES / "10k-inline-xbrl-sample.html").read_bytes()
-    document = _normalizer().normalize(_source(body, form=FilingForm.TEN_K))
+    document = _normalizer().normalize(_source(body, filing_type="10-K"))
     item_sections = {
         (block.part, block.item): block.canonical_section
         for block in document.blocks
@@ -173,6 +174,17 @@ def test_rejects_source_digest_mismatch() -> None:
         _normalizer().normalize(_source(b"<p>content</p>", expected_sha256="0" * 64))
 
     assert raised.value.code == "SOURCE_DIGEST_MISMATCH"
+
+
+def test_rejects_a_filing_type_without_a_normalization_profile() -> None:
+    with pytest.raises(DocumentParseError) as raised:
+        _normalizer().normalize(
+            _source(
+                b"<html><body><p>Current report</p></body></html>", filing_type="8-K"
+            )
+        )
+
+    assert raised.value.code == "UNSUPPORTED_SEC_FILING_TYPE"
 
 
 def test_recovers_malformed_html_and_falls_back_to_issuer_title() -> None:
@@ -291,7 +303,7 @@ def test_maps_10k_part_one_operational_sections() -> None:
         <p>Item 7. Management's Discussion and Analysis</p><p>Discussion.</p>
         <p>Item 8. Financial Statements and Supplementary Data</p><p>Statements.</p>
     """
-    document = _normalizer().normalize(_source(body, form=FilingForm.TEN_K))
+    document = _normalizer().normalize(_source(body, filing_type="10-K"))
     item_sections = {
         (block.part, block.item): block.canonical_section
         for block in document.blocks

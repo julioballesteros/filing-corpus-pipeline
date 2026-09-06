@@ -5,7 +5,12 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from filing_corpus_pipeline.discovery.models import DiscoveryResult
+from filing_corpus_pipeline.discovery.models import (
+    DiscoveryRequest,
+    DiscoveryResult,
+    DiscoveryTarget,
+)
+from filing_corpus_pipeline.domain import FilingSelection, IssuerReference
 from filing_corpus_pipeline.models import (
     LowercaseSha256Digest,
     NonEmptyString,
@@ -37,7 +42,7 @@ class RegulatorRegistration(PipelineModel):
 
     regulator: NonEmptyString
     issuer_id: NonEmptyString
-    filing_types: tuple[NonEmptyString, ...] = Field(min_length=1)
+    filings: tuple[FilingSelection, ...] = Field(min_length=1)
 
     @field_validator("regulator")
     @classmethod
@@ -53,10 +58,9 @@ class RegulatorRegistration(PipelineModel):
 
     @model_validator(mode="after")
     def _validate_unique_filing_types(self) -> "RegulatorRegistration":
-        if any(value != value.strip() for value in self.filing_types):
-            raise ValueError("filing_types must not contain surrounding space")
-        if len(set(self.filing_types)) != len(self.filing_types):
-            raise ValueError("filing_types must not contain duplicates")
+        filing_types = [selection.filing_type for selection in self.filings]
+        if len(set(filing_types)) != len(filing_types):
+            raise ValueError("filings must have unique filing_type values")
         return self
 
 
@@ -86,7 +90,7 @@ class DiscoveryCompany(PipelineModel):
 class DiscoveryTargetSet(PipelineModel):
     """Source-controlled discovery targets with an evolvable schema."""
 
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     target_set_id: NonEmptyString
     revision: int = Field(ge=1)
     description: NonEmptyString | None = None
@@ -173,4 +177,27 @@ def target_provenance(
         key=reference.key,
         version_id=reference.version_id,
         sha256=reference.sha256,
+    )
+
+
+def discovery_request(
+    target_set: DiscoveryTargetSet,
+    window: DiscoveryWindow,
+) -> DiscoveryRequest:
+    """Translate the versioned manifest into the source-neutral use-case input."""
+    return DiscoveryRequest(
+        targets=tuple(
+            DiscoveryTarget(
+                company_id=company.company_id,
+                issuer=IssuerReference(
+                    provider=registration.regulator,
+                    provider_issuer_id=registration.issuer_id,
+                ),
+                selections=registration.filings,
+            )
+            for company in target_set.companies
+            for registration in company.registrations
+        ),
+        filed_from=window.filed_from,
+        filed_to=window.filed_to,
     )

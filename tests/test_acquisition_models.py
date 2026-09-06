@@ -12,18 +12,19 @@ from filing_corpus_pipeline.acquisition import (
     RetrievedDocument,
     raw_document_key,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 
 
 def filing_reference() -> FilingReference:
     """Build a filing whose identity contains S3 path delimiters."""
     return FilingReference(
+        company_id="issuer-one",
         provider="provider/one",
         provider_filing_id="filing #1",
         provider_issuer_id="issuer/1",
         issuer_name="Issuer",
-        form=FilingForm.TEN_K,
+        filing_type="annual-report",
         filed_on=date(2025, 1, 1),
         report_date=None,
         accepted_at=None,

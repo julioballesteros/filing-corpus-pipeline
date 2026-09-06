@@ -69,8 +69,48 @@ class DiscoveryTargetRepository:
                 "target configuration is not valid UTF-8 JSON"
             ) from error
         try:
-            return DiscoveryTargetSet.model_validate(payload)
+            upgraded = _upgrade_schema(payload)
+        except ValueError as error:
+            raise InvalidDiscoveryTargetError(
+                f"target configuration is invalid: {error}"
+            ) from error
+        try:
+            return DiscoveryTargetSet.model_validate(upgraded)
         except ValidationError as error:
             raise InvalidDiscoveryTargetError(
                 f"target configuration is invalid: {validation_error_message(error)}"
             ) from error
+
+
+def _upgrade_schema(payload: object) -> object:
+    """Upgrade replayed schema-v1 filing-type lists to v2 selections."""
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return payload
+    companies = payload.get("companies")
+    if not isinstance(companies, list):
+        return payload
+    for company in companies:
+        if not isinstance(company, dict):
+            continue
+        registrations = company.get("registrations")
+        if not isinstance(registrations, list):
+            continue
+        for registration in registrations:
+            if not isinstance(registration, dict):
+                continue
+            if "filings" in registration:
+                raise ValueError("schema version 1 registrations must use filing_types")
+            if "filing_types" not in registration:
+                continue
+            filing_types = registration.pop("filing_types")
+            if isinstance(filing_types, list):
+                registration["filings"] = [
+                    {
+                        "filing_type": filing_type,
+                        "document_policy": "primary",
+                    }
+                    for filing_type in filing_types
+                ]
+            else:
+                registration["filings"] = filing_types
+    return payload

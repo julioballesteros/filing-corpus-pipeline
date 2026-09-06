@@ -9,7 +9,7 @@ from filing_corpus_pipeline.acquisition.sec import (
     SecDocumentConfig,
     SecFilingDocumentSource,
 )
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
 from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
 
@@ -55,11 +55,12 @@ class StubBytesTransport:
 def filing_reference() -> FilingReference:
     """Build the canonical Apple SEC archive reference."""
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="0000320193-25-000079",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=None,
         accepted_at=None,
@@ -140,6 +141,12 @@ def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
                 update={"provider_issuer_id": "not-a-cik"},
             ),
             "SEC_INVALID_CIK",
+        ),
+        (
+            filing_reference().model_copy(
+                update={"document_policy": "earnings-release"}
+            ),
+            "SEC_UNSUPPORTED_DOCUMENT_POLICY",
         ),
     ],
 )

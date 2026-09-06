@@ -17,7 +17,7 @@ class CapturingService:
 
     def execute(self, request: DiscoveryRequest) -> DiscoveryResult:
         self.request = request
-        return DiscoveryResult(filings=(), issuers_scanned=len(request.issuers))
+        return DiscoveryResult(filings=(), issuers_scanned=len(request.targets))
 
 
 def test_cli_executes_local_discovery_and_prints_workflow_payload(
@@ -28,11 +28,11 @@ def test_cli_executes_local_discovery_and_prints_workflow_payload(
     service = CapturingService()
     seen_user_agents: list[str] = []
 
-    def build_service(user_agent: str) -> CapturingService:
-        seen_user_agents.append(user_agent)
+    def build_service(*, sec_user_agent: str) -> CapturingService:
+        seen_user_agents.append(sec_user_agent)
         return service
 
-    monkeypatch.setattr(cli, "build_sec_discovery_service", build_service)
+    monkeypatch.setattr(cli, "build_discovery_service", build_service)
     monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
 
     cli.main(
@@ -60,7 +60,11 @@ def test_cli_executes_local_discovery_and_prints_workflow_payload(
     assert seen_user_agents == ["pipeline contact@example.com"]
     assert service.request is not None
     assert service.request.filed_from == date(2025, 1, 1)
-    assert {form.value for form in service.request.forms} == {"10-Q"}
+    assert {
+        selection.filing_type
+        for target in service.request.targets
+        for selection in target.selections
+    } == {"10-Q"}
 
 
 def test_cli_requires_a_declared_user_agent(

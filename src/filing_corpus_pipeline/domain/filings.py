@@ -1,4 +1,4 @@
-"""Provider-neutral filing identifiers passed between pipeline stages."""
+"""Provider-neutral filing identities and processing selections."""
 
 from datetime import date, datetime
 from enum import StrEnum
@@ -8,11 +8,24 @@ from pydantic import AwareDatetime, field_validator
 from filing_corpus_pipeline.models import NonEmptyString, PipelineModel
 
 
-class FilingForm(StrEnum):
-    """Filing forms supported by the initial corpus pipeline."""
+class DocumentPolicy(StrEnum):
+    """Document-selection capabilities implemented by the deployed pipeline."""
 
-    TEN_K = "10-K"
-    TEN_Q = "10-Q"
+    PRIMARY = "primary"
+
+
+class FilingSelection(PipelineModel):
+    """A source-qualified filing type and the document content to process."""
+
+    filing_type: NonEmptyString
+    document_policy: DocumentPolicy = DocumentPolicy.PRIMARY
+
+    @field_validator("filing_type")
+    @classmethod
+    def _require_canonical_filing_type(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("must not contain surrounding space")
+        return value
 
 
 class IssuerReference(PipelineModel):
@@ -25,17 +38,26 @@ class IssuerReference(PipelineModel):
 class FilingReference(PipelineModel):
     """The metadata required to start processing one filing."""
 
+    company_id: NonEmptyString
     provider: NonEmptyString
     provider_filing_id: NonEmptyString
     provider_issuer_id: NonEmptyString
     issuer_name: NonEmptyString
-    form: FilingForm
+    filing_type: NonEmptyString
+    document_policy: DocumentPolicy = DocumentPolicy.PRIMARY
     filed_on: date
     report_date: date | None
     accepted_at: AwareDatetime | None
     primary_document: NonEmptyString
     filing_detail_url: NonEmptyString
     primary_document_url: NonEmptyString
+
+    @field_validator("filing_type")
+    @classmethod
+    def _require_canonical_filing_type(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("must not contain surrounding space")
+        return value
 
     @field_validator("filed_on", "report_date", mode="before")
     @classmethod

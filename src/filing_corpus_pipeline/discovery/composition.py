@@ -8,18 +8,24 @@ from filing_corpus_pipeline.discovery.target_repository import (
     DiscoveryTargetRepository,
 )
 from filing_corpus_pipeline.runtime.aws import aws_client
+from filing_corpus_pipeline.runtime.config import required_environment
 from filing_corpus_pipeline.sources.http import UrllibHttpTransport
 from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
 from filing_corpus_pipeline.storage.s3 import S3ObjectClient, S3ReadApi
 
 
-def build_sec_discovery_service(user_agent: str) -> DiscoveryService:
-    """Compose the SEC client and discovery-specific listing behavior."""
+def build_discovery_service(*, sec_user_agent: str | None = None) -> DiscoveryService:
+    """Compose all filing sources enabled in the discovery runtime."""
+    user_agent = (
+        sec_user_agent
+        if sec_user_agent is not None
+        else required_environment("SEC_USER_AGENT")
+    )
     client = SecEdgarClient(
         transport=UrllibHttpTransport(),
         config=SecEdgarClientConfig(user_agent=user_agent),
     )
-    return DiscoveryService(SecFilingDiscoverySource(client))
+    return DiscoveryService([SecFilingDiscoverySource(client)])
 
 
 def build_discovery_target_repository() -> DiscoveryTargetRepository:

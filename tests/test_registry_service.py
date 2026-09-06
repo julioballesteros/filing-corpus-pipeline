@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -120,11 +120,12 @@ def service(client: StubRegistryClient) -> FilingRegistryService:
 def filing_reference() -> FilingReference:
     """Build the filing passed from discovery to acquisition."""
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="0000320193-25-000079",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=None,
         accepted_at=None,

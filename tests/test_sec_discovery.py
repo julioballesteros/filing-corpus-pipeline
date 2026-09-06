@@ -5,9 +5,13 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from filing_corpus_pipeline.discovery import DiscoveryRequest, DiscoveryService
+from filing_corpus_pipeline.discovery import (
+    DiscoveryRequest,
+    DiscoveryService,
+    DiscoveryTarget,
+)
 from filing_corpus_pipeline.discovery.sec import SecFilingDiscoverySource
-from filing_corpus_pipeline.domain import FilingForm, IssuerReference
+from filing_corpus_pipeline.domain import FilingSelection, IssuerReference
 from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
 from filing_corpus_pipeline.sources.sec import (
     SEC_DATA_BASE_URL,
@@ -108,6 +112,31 @@ def build_client(
     )
 
 
+def discovery_request(
+    *,
+    filing_types: tuple[str, ...] = ("10-K", "10-Q"),
+    filed_from: date = date(2024, 1, 1),
+    filed_to: date = date(2026, 8, 31),
+) -> DiscoveryRequest:
+    return DiscoveryRequest(
+        targets=(
+            DiscoveryTarget(
+                company_id="apple-inc",
+                issuer=IssuerReference(
+                    provider="sec",
+                    provider_issuer_id="320193",
+                ),
+                selections=tuple(
+                    FilingSelection(filing_type=filing_type)
+                    for filing_type in filing_types
+                ),
+            ),
+        ),
+        filed_from=filed_from,
+        filed_to=filed_to,
+    )
+
+
 def test_sec_source_returns_only_requested_forms_and_dates() -> None:
     """Recent and overlapping historical metadata map to stable references."""
     main_url = f"{SEC_DATA_BASE_URL}/CIK0000320193.json"
@@ -152,13 +181,8 @@ def test_sec_source_returns_only_requested_forms_and_dates() -> None:
             history_url: [historical],
         }
     )
-    service = DiscoveryService(SecFilingDiscoverySource(build_client(transport)))
-    request = DiscoveryRequest(
-        issuers=(IssuerReference(provider="sec", provider_issuer_id="320193"),),
-        forms=frozenset(FilingForm),
-        filed_from=date(2024, 1, 1),
-        filed_to=date(2026, 8, 31),
-    )
+    service = DiscoveryService([SecFilingDiscoverySource(build_client(transport))])
+    request = discovery_request()
 
     result = service.execute(request)
 
@@ -168,9 +192,10 @@ def test_sec_source_returns_only_requested_forms_and_dates() -> None:
         "0000320193-26-000003",
     ]
     latest = result.filings[-1]
+    assert latest.company_id == "apple-inc"
     assert latest.issuer.provider_issuer_id == "0000320193"
     assert latest.issuer_name == "APPLE INC"
-    assert latest.form is FilingForm.TEN_Q
+    assert latest.filing_type == "10-Q"
     assert latest.report_date == date(2026, 6, 30)
     assert latest.accepted_at == datetime(2026, 8, 1, 10, 30, tzinfo=UTC)
     assert latest.filing_detail_url.endswith(
@@ -206,11 +231,10 @@ def test_discovery_skips_nonoverlapping_historical_files() -> None:
         }
     )
 
-    service = DiscoveryService(SecFilingDiscoverySource(build_client(transport)))
+    service = DiscoveryService([SecFilingDiscoverySource(build_client(transport))])
     result = service.execute(
-        DiscoveryRequest(
-            issuers=(IssuerReference(provider="sec", provider_issuer_id="320193"),),
-            forms=frozenset({FilingForm.TEN_Q}),
+        discovery_request(
+            filing_types=("10-Q",),
             filed_from=date(2026, 1, 1),
             filed_to=date(2026, 12, 31),
         )
@@ -218,6 +242,16 @@ def test_discovery_skips_nonoverlapping_historical_files() -> None:
 
     assert len(result.filings) == 1
     assert [call[0] for call in transport.calls] == [main_url]
+
+
+def test_sec_source_rejects_an_unsupported_route_before_http() -> None:
+    transport = FakeTransport({})
+    service = DiscoveryService([SecFilingDiscoverySource(build_client(transport))])
+
+    with pytest.raises(ValueError, match="unsupported SEC filing selection"):
+        service.execute(discovery_request(filing_types=("8-K",)))
+
+    assert transport.calls == []
 
 
 def test_client_retries_transient_transport_errors() -> None:

@@ -9,7 +9,7 @@ resource "aws_sfn_state_machine" "discovery" {
   type     = "STANDARD"
 
   definition = jsonencode({
-    Comment = "Discover, acquire, and normalize SEC filings for one deterministic date window."
+    Comment = "Discover, acquire, and normalize configured filings for one deterministic date window."
     StartAt = "DiscoverFilings"
     States = {
       DiscoverFilings = {
@@ -181,6 +181,9 @@ resource "aws_sfn_state_machine" "discovery" {
             BuildFilingResult = {
               Type = "Pass"
               Parameters = {
+                "company_id.$"         = "$.filing.company_id"
+                "document_policy.$"    = "$.filing.document_policy"
+                "filing_type.$"        = "$.filing.filing_type"
                 "provider.$"           = "$.filing.provider"
                 "provider_filing_id.$" = "$.filing.provider_filing_id"
                 "acquisition.$"        = "$.acquisition.result"
@@ -191,6 +194,9 @@ resource "aws_sfn_state_machine" "discovery" {
             AcquisitionDeferred = {
               Type = "Pass"
               Parameters = {
+                "company_id.$"         = "$.filing.company_id"
+                "document_policy.$"    = "$.filing.document_policy"
+                "filing_type.$"        = "$.filing.filing_type"
                 "provider.$"           = "$.filing.provider"
                 "provider_filing_id.$" = "$.filing.provider_filing_id"
                 "acquisition.$"        = "$.acquisition.result"
@@ -201,6 +207,9 @@ resource "aws_sfn_state_machine" "discovery" {
             AcquisitionFailed = {
               Type = "Pass"
               Parameters = {
+                "company_id.$"         = "$.filing.company_id"
+                "document_policy.$"    = "$.filing.document_policy"
+                "filing_type.$"        = "$.filing.filing_type"
                 "provider.$"           = "$.filing.provider"
                 "provider_filing_id.$" = "$.filing.provider_filing_id"
                 acquisition = {
@@ -214,6 +223,9 @@ resource "aws_sfn_state_machine" "discovery" {
             NormalizationFailed = {
               Type = "Pass"
               Parameters = {
+                "company_id.$"         = "$.filing.company_id"
+                "document_policy.$"    = "$.filing.document_policy"
+                "filing_type.$"        = "$.filing.filing_type"
                 "provider.$"           = "$.filing.provider"
                 "provider_filing_id.$" = "$.filing.provider_filing_id"
                 "acquisition.$"        = "$.acquisition.result"

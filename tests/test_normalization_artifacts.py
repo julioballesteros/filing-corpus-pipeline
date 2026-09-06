@@ -7,7 +7,7 @@ from hashlib import sha256
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.normalization import (
     BLOCKS_FILENAME,
     NormalizedDocument,
@@ -21,11 +21,12 @@ from filing_corpus_pipeline.normalization import (
 
 def _document() -> NormalizedDocument:
     filing = FilingReference(
+        company_id="example-issuer",
         provider="provider/one",
         provider_filing_id="filing #1",
         provider_issuer_id="issuer/1",
         issuer_name="Example Issuer",
-        form=FilingForm.TEN_Q,
+        filing_type="quarterly-report",
         filed_on=date(2025, 4, 30),
         report_date=None,
         accepted_at=None,
@@ -39,14 +40,18 @@ def _document() -> NormalizedDocument:
         <table><tr><th>Metric</th><th>Value</th></tr><tr><td>Revenue</td><td>10</td></tr></table>
         <h3>ITEM 2. MANAGEMENT'S DISCUSSION AND ANALYSIS</h3><p>Demand improved.</p>
     """
-    return SecHtmlNormalizer(SecHtmlParserConfig(short_document_chars=1)).normalize(
+    source_filing = filing.model_copy(update={"provider": "sec", "filing_type": "10-Q"})
+    normalized = SecHtmlNormalizer(
+        SecHtmlParserConfig(short_document_chars=1)
+    ).normalize(
         RawFilingDocument(
             filing_key="provider/one#filing #1",
-            filing=filing,
+            filing=source_filing,
             body=body,
             content_type="text/html",
         )
     )
+    return normalized.model_copy(update={"filing": filing})
 
 
 def test_artifacts_are_reproducible_and_self_verifying() -> None:
@@ -64,8 +69,8 @@ def test_artifacts_are_reproducible_and_self_verifying() -> None:
     assert gzip.decompress(first.blocks_jsonl_gzip).endswith(b"\n")
     assert first.manifest_sha256 == sha256(first.manifest).hexdigest()
     assert first.blocks_sha256 == sha256(first.blocks_jsonl_gzip).hexdigest()
-    assert manifest["schema_version"] == "1"
-    assert manifest["parser_version"] == "sec-html-v2"
+    assert manifest["schema_version"] == "2"
+    assert manifest["parser_version"] == "sec-html-v3"
     assert manifest["quality"] == {"status": "PASS", "warnings": []}
     assert manifest["statistics"]["block_count"] == len(records)
     assert manifest["statistics"]["table_count"] == 1
@@ -85,7 +90,7 @@ def test_normalized_prefix_escapes_identity_segments() -> None:
 
     assert normalized_document_prefix(document) == (
         "normalized/provider%2Fone/issuer%2F1/filing%20%231/"
-        "sec-html-v2/" + document.source_sha256
+        "sec-html-v3/" + document.source_sha256
     )
 
 

@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.registry import (
     ClaimRequest,
     FailureDetails,
@@ -66,11 +66,12 @@ class StubDynamoDbApi:
 def filing_reference() -> FilingReference:
     """Build the filing passed from discovery to acquisition."""
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="0000320193-25-000079",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=None,
         accepted_at=None,
@@ -112,7 +113,10 @@ def test_claim_serializes_an_atomic_conditional_update() -> None:
     assert isinstance(values, dict)
     assert values[":lease_expires_at_epoch"] == {"N": "1754071500"}
     assert values[":report_date"] == {"NULL": True}
-    assert values[":schema_version"] == {"N": "1"}
+    assert values[":company_id"] == {"S": "apple-inc"}
+    assert values[":filing_type"] == {"S": "10-Q"}
+    assert values[":document_policy"] == {"S": "primary"}
+    assert values[":schema_version"] == {"N": "2"}
 
 
 def test_claim_deserializes_the_previous_registry_item() -> None:

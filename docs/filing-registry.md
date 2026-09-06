@@ -14,8 +14,8 @@ The first successful claim stores:
 
 | Group | Attributes |
 | --- | --- |
-| Identity | `filing_key`, `provider`, `provider_filing_id`, `provider_issuer_id` |
-| Source metadata | issuer, form, filing/report dates, source URLs and primary document |
+| Identity | `filing_key`, `company_id`, `provider`, `provider_filing_id`, `provider_issuer_id` |
+| Source metadata | issuer, filing type, document policy, filing/report dates, source URLs and primary document |
 | Claim | `status`, `claim_owner`, `lease_expires_at_epoch`, `attempt_count` |
 | Audit | `first_discovered_at`, `last_claimed_at`, `updated_at`, `schema_version` |
 | Raw object | S3 bucket/key/version, ETag, SHA-256, length, content type and storage timestamp |
@@ -24,7 +24,7 @@ The first successful claim stores:
 | Failures | separate bounded acquisition and normalization error fields, timestamps and retryability |
 
 Nullable filing metadata uses DynamoDB `NULL` values rather than missing fields,
-making the version-one shape explicit. Claim and failure attributes are removed
+making the version-two shape explicit. Claim and failure attributes are removed
 when they no longer describe the current state.
 
 ## State transitions

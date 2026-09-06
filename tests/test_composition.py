@@ -8,7 +8,7 @@ from filing_corpus_pipeline.acquisition import AcquisitionService
 from filing_corpus_pipeline.acquisition import composition as acquisition_composition
 from filing_corpus_pipeline.discovery import DiscoveryService
 from filing_corpus_pipeline.discovery import composition as discovery_composition
-from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
+from filing_corpus_pipeline.discovery.composition import build_discovery_service
 from filing_corpus_pipeline.normalization import NormalizationService
 from filing_corpus_pipeline.normalization import (
     composition as normalization_composition,
@@ -19,7 +19,18 @@ from filing_corpus_pipeline.runtime import aws as runtime_aws
 def test_discovery_composition_builds_the_sec_service() -> None:
     """The discovery callers share one feature-local dependency graph."""
     assert isinstance(
-        build_sec_discovery_service("pipeline contact@example.com"),
+        build_discovery_service(sec_user_agent="pipeline contact@example.com"),
+        DiscoveryService,
+    )
+
+
+def test_discovery_composition_reads_source_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
+
+    assert isinstance(
+        build_discovery_service(),
         DiscoveryService,
     )
 

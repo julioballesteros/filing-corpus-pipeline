@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.normalization import (
     NormalizationOutcome,
     NormalizationRequest,
@@ -46,11 +46,12 @@ NOW = datetime(2025, 8, 1, 18, 0, tzinfo=UTC)
 
 def filing() -> FilingReference:
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="0000320193-25-000079",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=date(2025, 6, 28),
         accepted_at=NOW,
@@ -187,7 +188,7 @@ def test_normalize_publishes_artifacts_then_registry_metadata() -> None:
     assert raw.loads == [(raw_document(), 1024)]
     assert corpus.writes[0].source_sha256 == DIGEST
     assert registry.normalized[0].corpus == result.corpus
-    assert registry.claims[0].parser_version == "sec-html-v2"
+    assert registry.claims[0].parser_version == "sec-html-v3"
 
 
 def test_normalize_returns_an_existing_corpus_without_reading_s3() -> None:
@@ -222,7 +223,7 @@ def test_normalize_records_and_classifies_a_permanent_parse_failure() -> None:
 
     assert raised.value.code == "EMPTY_SOURCE_DOCUMENT"
     assert registry.failed[0].failure.retryable is False
-    assert registry.failed[0].parser_version == "sec-html-v2"
+    assert registry.failed[0].parser_version == "sec-html-v3"
 
 
 def test_normalize_records_and_classifies_a_retryable_raw_read_failure() -> None:

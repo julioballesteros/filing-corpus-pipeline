@@ -73,7 +73,7 @@ document corpus for narrative and RAG-oriented consumers.
 
 ## Output contract
 
-The schema version is `1`; the parser version is `sec-html-v2`. They change for
+The schema version is `2`; the parser version is `sec-html-v3`. They change for
 different reasons:
 
 - increment the schema version when a downstream-facing field or meaning

@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.normalization import (
     NormalizationRequest,
     NormalizationResult,
@@ -22,11 +22,12 @@ NOW = datetime(2025, 8, 1, 18, 0, tzinfo=UTC)
 
 def filing() -> FilingReference:
     return FilingReference(
+        company_id="apple-inc",
         provider="sec",
         provider_filing_id="accession",
         provider_issuer_id="0000320193",
         issuer_name="Apple Inc.",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 8, 1),
         report_date=None,
         accepted_at=None,

@@ -7,9 +7,9 @@ from collections.abc import Sequence
 from datetime import date
 from typing import cast
 
-from filing_corpus_pipeline.discovery.composition import build_sec_discovery_service
-from filing_corpus_pipeline.discovery.models import DiscoveryRequest
-from filing_corpus_pipeline.domain import FilingForm, IssuerReference
+from filing_corpus_pipeline.discovery.composition import build_discovery_service
+from filing_corpus_pipeline.discovery.models import DiscoveryRequest, DiscoveryTarget
+from filing_corpus_pipeline.domain import FilingSelection, IssuerReference
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,7 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument(
         "--form",
         action="append",
-        choices=[form.value for form in FilingForm],
         help="filing form to include; defaults to 10-K and 10-Q",
     )
     discover.add_argument(
@@ -71,18 +70,24 @@ def main(argv: Sequence[str] | None = None) -> None:
     except ValueError as error:
         parser.error(f"invalid ISO filing date: {error}")
 
-    forms = (
-        frozenset(FilingForm(value) for value in form_values)
-        if form_values
-        else frozenset(FilingForm)
-    )
+    filing_types = form_values or ["10-K", "10-Q"]
     request = DiscoveryRequest(
-        issuers=tuple(
-            IssuerReference(provider="sec", provider_issuer_id=cik) for cik in ciks
+        targets=tuple(
+            DiscoveryTarget(
+                company_id=f"sec-{cik}",
+                issuer=IssuerReference(
+                    provider="sec",
+                    provider_issuer_id=cik,
+                ),
+                selections=tuple(
+                    FilingSelection(filing_type=filing_type)
+                    for filing_type in filing_types
+                ),
+            )
+            for cik in ciks
         ),
-        forms=forms,
         filed_from=filed_from,
         filed_to=filed_to,
     )
-    result = build_sec_discovery_service(user_agent).execute(request)
+    result = build_discovery_service(sec_user_agent=user_agent).execute(request)
     print(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))

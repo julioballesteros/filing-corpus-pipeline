@@ -244,6 +244,21 @@ run "default_ingestion_slice" {
   }
 
   assert {
+    condition = (
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.BuildFilingResult
+      .Parameters["company_id.$"] == "$.filing.company_id" &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.BuildFilingResult
+      .Parameters["filing_type.$"] == "$.filing.filing_type" &&
+      jsondecode(aws_sfn_state_machine.discovery.definition)
+      .States.AcquireFilings.ItemProcessor.States.BuildFilingResult
+      .Parameters["document_policy.$"] == "$.filing.document_policy"
+    )
+    error_message = "Workflow results must retain cross-regulator company identity and filing selection."
+  }
+
+  assert {
     condition = contains(
       jsondecode(aws_sfn_state_machine.discovery.definition)
       .States.AcquireFilings.ItemProcessor.States.NormalizeFiling.Retry[0].ErrorEquals,

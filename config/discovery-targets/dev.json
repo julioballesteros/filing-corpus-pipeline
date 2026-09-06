@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target_set_id": "portfolio-core",
-  "revision": 1,
+  "revision": 2,
   "description": "Initial SEC filing discovery watchlist.",
   "companies": [
     {
@@ -11,7 +11,16 @@
         {
           "regulator": "sec",
           "issuer_id": "0000320193",
-          "filing_types": ["10-K", "10-Q"]
+          "filings": [
+            {
+              "filing_type": "10-K",
+              "document_policy": "primary"
+            },
+            {
+              "filing_type": "10-Q",
+              "document_policy": "primary"
+            }
+          ]
         }
       ]
     },
@@ -22,7 +31,16 @@
         {
           "regulator": "sec",
           "issuer_id": "0000789019",
-          "filing_types": ["10-K", "10-Q"]
+          "filings": [
+            {
+              "filing_type": "10-K",
+              "document_policy": "primary"
+            },
+            {
+              "filing_type": "10-Q",
+              "document_policy": "primary"
+            }
+          ]
         }
       ]
     }

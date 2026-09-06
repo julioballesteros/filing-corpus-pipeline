@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingForm, FilingReference
+from filing_corpus_pipeline.domain import FilingReference
 from filing_corpus_pipeline.normalization import (
     SEC_HTML_PARSER_VERSION,
     BlockSection,
@@ -22,11 +22,12 @@ from filing_corpus_pipeline.normalization import (
 
 def _filing() -> FilingReference:
     return FilingReference(
+        company_id="example-issuer",
         provider="sec",
         provider_filing_id="0000000000-25-000001",
         provider_issuer_id="0000000000",
         issuer_name="Example Issuer",
-        form=FilingForm.TEN_Q,
+        filing_type="10-Q",
         filed_on=date(2025, 4, 30),
         report_date=date(2025, 3, 31),
         accepted_at=None,

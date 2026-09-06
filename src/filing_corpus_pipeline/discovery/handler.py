@@ -7,24 +7,20 @@ from datetime import UTC, date, datetime, timedelta
 from pydantic import ValidationError
 
 from filing_corpus_pipeline.discovery.composition import (
+    build_discovery_service,
     build_discovery_target_repository,
-    build_sec_discovery_service,
 )
-from filing_corpus_pipeline.discovery.models import DiscoveryRequest
 from filing_corpus_pipeline.discovery.targets import (
     DiscoveryInvocation,
     DiscoveryTargetReference,
-    DiscoveryTargetSet,
     DiscoveryWindow,
     TargetedDiscoveryResult,
+    discovery_request,
     target_provenance,
 )
-from filing_corpus_pipeline.domain import FilingForm, IssuerReference
 from filing_corpus_pipeline.models import validation_error_message
-from filing_corpus_pipeline.runtime.config import required_environment
 
 LOGGER = logging.getLogger(__name__)
-SUPPORTED_REGULATOR = "sec"
 
 
 class InvalidDiscoveryEvent(ValueError):
@@ -32,14 +28,14 @@ class InvalidDiscoveryEvent(ValueError):
 
 
 def handler(event: object, context: object) -> dict[str, object]:
-    """Resolve deployed targets, discover SEC filings, and return references."""
+    """Resolve deployed targets, discover filings, and return references."""
     del context
     invocation = parse_discovery_event(event)
-    user_agent = required_environment("SEC_USER_AGENT")
+    service = build_discovery_service()
 
     target_set = build_discovery_target_repository().load(invocation.target_config)
-    requests = _sec_discovery_requests(target_set, invocation.window)
-    result = build_sec_discovery_service(user_agent).execute_many(requests)
+    request = discovery_request(target_set, invocation.window)
+    result = service.execute(request)
     targeted_result = TargetedDiscoveryResult(
         filings=result.filings,
         issuers_scanned=result.issuers_scanned,
@@ -48,7 +44,7 @@ def handler(event: object, context: object) -> dict[str, object]:
     LOGGER.info(
         "Filing discovery completed",
         extra={
-            "regulator": SUPPORTED_REGULATOR,
+            "providers": sorted({target.issuer.provider for target in request.targets}),
             "target_set_id": target_set.target_set_id,
             "target_set_revision": target_set.revision,
             "target_config_version_id": invocation.target_config.version_id,
@@ -83,54 +79,6 @@ def parse_discovery_event(event: object) -> DiscoveryInvocation:
         )
     except ValidationError as error:
         raise InvalidDiscoveryEvent(validation_error_message(error)) from error
-
-
-def _sec_discovery_requests(
-    target_set: DiscoveryTargetSet,
-    window: DiscoveryWindow,
-) -> tuple[DiscoveryRequest, ...]:
-    """Translate per-registration target settings for the current SEC source."""
-    registrations = [
-        registration
-        for company in target_set.companies
-        for registration in company.registrations
-    ]
-    unsupported = sorted(
-        {
-            registration.regulator
-            for registration in registrations
-            if registration.regulator != SUPPORTED_REGULATOR
-        }
-    )
-    if unsupported:
-        raise InvalidDiscoveryEvent(
-            "target configuration contains regulators unsupported by this runtime: "
-            + ", ".join(unsupported)
-        )
-
-    requests: list[DiscoveryRequest] = []
-    for registration in registrations:
-        try:
-            forms = frozenset(FilingForm(value) for value in registration.filing_types)
-        except ValueError as error:
-            raise InvalidDiscoveryEvent(
-                f"unsupported SEC filing type for issuer {registration.issuer_id!r}: "
-                f"{error}"
-            ) from error
-        requests.append(
-            DiscoveryRequest(
-                issuers=(
-                    IssuerReference(
-                        provider=SUPPORTED_REGULATOR,
-                        provider_issuer_id=registration.issuer_id,
-                    ),
-                ),
-                forms=forms,
-                filed_from=window.filed_from,
-                filed_to=window.filed_to,
-            )
-        )
-    return tuple(requests)
 
 
 def _mapping(value: object, *, field: str) -> Mapping[str, object]:
