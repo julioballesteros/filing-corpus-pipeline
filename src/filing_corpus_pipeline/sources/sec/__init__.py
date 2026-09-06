@@ -11,10 +11,13 @@ from filing_corpus_pipeline.sources.sec.client import (
     SecSubmission,
     SecSubmissionFile,
 )
+from filing_corpus_pipeline.sources.sec.filing_documents import SecFilingDocument
 from filing_corpus_pipeline.sources.sec.identifiers import (
     SEC_ARCHIVE_BASE_URL,
     normalize_cik,
+    sec_filing_detail_url,
     sec_filing_directory_url,
+    sec_filing_document_url,
     sec_primary_document_url,
 )
 
@@ -25,11 +28,14 @@ __all__ = [
     "SecDocument",
     "SecEdgarClient",
     "SecEdgarClientConfig",
+    "SecFilingDocument",
     "SecRequestError",
     "SecResponseError",
     "SecSubmission",
     "SecSubmissionFile",
     "normalize_cik",
+    "sec_filing_detail_url",
     "sec_filing_directory_url",
+    "sec_filing_document_url",
     "sec_primary_document_url",
 ]

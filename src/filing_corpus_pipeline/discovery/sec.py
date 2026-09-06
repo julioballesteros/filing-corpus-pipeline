@@ -6,7 +6,8 @@ from filing_corpus_pipeline.domain import DocumentPolicy, FilingReference
 from filing_corpus_pipeline.sources.sec import (
     SecEdgarClient,
     SecSubmission,
-    sec_filing_directory_url,
+    sec_filing_detail_url,
+    sec_filing_document_url,
 )
 
 
@@ -102,10 +103,6 @@ def _to_filing_reference(
     ):
         return None
 
-    directory_url = sec_filing_directory_url(
-        submission.cik,
-        submission.accession_number,
-    )
     return FilingReference(
         company_id=target.company_id,
         provider="sec",
@@ -118,6 +115,13 @@ def _to_filing_reference(
         report_date=submission.report_date,
         accepted_at=submission.accepted_at,
         primary_document=submission.primary_document,
-        filing_detail_url=(f"{directory_url}/{submission.accession_number}-index.html"),
-        primary_document_url=f"{directory_url}/{submission.primary_document}",
+        filing_detail_url=sec_filing_detail_url(
+            submission.cik,
+            submission.accession_number,
+        ),
+        primary_document_url=sec_filing_document_url(
+            submission.cik,
+            submission.accession_number,
+            submission.primary_document,
+        ),
     )

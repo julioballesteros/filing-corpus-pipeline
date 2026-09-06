@@ -56,6 +56,15 @@ The provider-neutral `SourceDocumentReference` contract is already in place for
 that next step. It records the actual document name, provider document type,
 optional description, canonical URL, and resolver version alongside the bytes.
 
+The shared SEC client now exposes a bounded `get_filing_documents` operation
+for the source-specific resolver. It derives the filing-detail URL from the CIK
+and accession number, parses only the SEC `Document Format Files` table, and
+returns typed sequence, description, filename, SEC document type, byte size,
+and canonical URL values. The parser excludes the complete-submission row and
+the separate XBRL data-file table, normalizes display whitespace, and rejects
+missing, duplicate, or malformed identities. It deliberately does not choose
+an exhibit; that acquisition policy remains the next step.
+
 ## Object identity and idempotency
 
 Raw documents use this deterministic key:

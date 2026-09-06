@@ -52,8 +52,9 @@ contact address and do not commit it to the repository.
 - `normalization`: deterministic SEC HTML parsing, section classification, data
   quality findings, versioned corpus artifact rendering, composition, and its
   Lambda handler.
-- `sources/sec`: the reusable typed SEC EDGAR client, source response models,
-  identifier validation, and canonical endpoint construction.
+- `sources/sec`: the reusable typed SEC EDGAR client, filing-document inventory
+  parsing, source response models, identifier validation, and canonical
+  endpoint construction.
 - `registry`: filing claim models and the concrete registry service.
 - `storage`: bounded S3 reads, raw and normalized object persistence, and the
   DynamoDB client, separated by storage concern.

@@ -7,12 +7,19 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from filing_corpus_pipeline.sources.http import (
+    HttpBytesResponse,
     HttpTransport,
     HttpTransportError,
 )
+from filing_corpus_pipeline.sources.sec.filing_documents import (
+    SecFilingDocument,
+    SecFilingDocumentResponseError,
+    parse_filing_documents,
+)
 from filing_corpus_pipeline.sources.sec.identifiers import (
     normalize_cik,
-    sec_primary_document_url,
+    sec_filing_detail_url,
+    sec_filing_document_url,
 )
 
 SEC_DATA_BASE_URL = "https://data.sec.gov/submissions"
@@ -174,20 +181,64 @@ class SecEdgarClient:
         *,
         cik: str,
         accession_number: str,
-        primary_document: str,
+        document_name: str,
         max_bytes: int,
     ) -> SecDocument:
-        """Retrieve one bounded primary document from the SEC archive."""
-        url = sec_primary_document_url(cik, accession_number, primary_document)
+        """Retrieve one bounded document from an SEC filing archive."""
+        url = sec_filing_document_url(cik, accession_number, document_name)
+        response = self._get_archive_bytes(
+            url,
+            max_bytes=max_bytes,
+            accept=(
+                "text/html, application/xhtml+xml, " "application/xml;q=0.9, */*;q=0.1"
+            ),
+        )
+        return SecDocument(
+            body=response.body,
+            content_type=response.content_type,
+            source_url=url,
+            etag=response.etag,
+            last_modified=response.last_modified,
+        )
+
+    def get_filing_documents(
+        self,
+        *,
+        cik: str,
+        accession_number: str,
+        max_bytes: int,
+    ) -> tuple[SecFilingDocument, ...]:
+        """Retrieve and validate the document inventory for one SEC filing."""
+        url = sec_filing_detail_url(cik, accession_number)
+        response = self._get_archive_bytes(
+            url,
+            max_bytes=max_bytes,
+            accept="text/html, application/xhtml+xml;q=0.9",
+        )
+        try:
+            return parse_filing_documents(
+                response.body,
+                cik=cik,
+                accession_number=accession_number,
+            )
+        except SecFilingDocumentResponseError as error:
+            raise SecResponseError(str(error)) from error
+
+    def _get_archive_bytes(
+        self,
+        url: str,
+        *,
+        max_bytes: int,
+        accept: str,
+    ) -> HttpBytesResponse:
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
         self._pace_request()
         try:
-            response = self._transport.get_bytes(
+            return self._transport.get_bytes(
                 url,
                 headers={
-                    "Accept": (
-                        "text/html, application/xhtml+xml, "
-                        "application/xml;q=0.9, */*;q=0.1"
-                    ),
+                    "Accept": accept,
                     "User-Agent": self._config.user_agent,
                 },
                 timeout_seconds=self._config.timeout_seconds,
@@ -199,13 +250,6 @@ class SecEdgarClient:
                 retryable=error.retryable,
                 code=error.code,
             ) from error
-        return SecDocument(
-            body=response.body,
-            content_type=response.content_type,
-            source_url=url,
-            etag=response.etag,
-            last_modified=response.last_modified,
-        )
 
     def _get_json(self, file_name: str) -> object:
         url = f"{SEC_DATA_BASE_URL}/{file_name}"

@@ -25,12 +25,27 @@ def sec_filing_directory_url(cik: str, accession_number: str) -> str:
     return f"{SEC_ARCHIVE_BASE_URL}/{archive_cik}/{accession_path}"
 
 
+def sec_filing_detail_url(cik: str, accession_number: str) -> str:
+    """Build the canonical filing-detail URL for one SEC submission."""
+    directory_url = sec_filing_directory_url(cik, accession_number)
+    return f"{directory_url}/{accession_number}-index.html"
+
+
+def sec_filing_document_url(
+    cik: str,
+    accession_number: str,
+    document_name: str,
+) -> str:
+    """Build the canonical archive URL for one document in a filing."""
+    if DOCUMENT_NAME_PATTERN.fullmatch(document_name) is None:
+        raise ValueError(f"invalid SEC filing document name: {document_name!r}")
+    return f"{sec_filing_directory_url(cik, accession_number)}/{document_name}"
+
+
 def sec_primary_document_url(
     cik: str,
     accession_number: str,
     primary_document: str,
 ) -> str:
     """Build the canonical URL for a filing's primary document."""
-    if DOCUMENT_NAME_PATTERN.fullmatch(primary_document) is None:
-        raise ValueError(f"invalid SEC primary document name: {primary_document!r}")
-    return f"{sec_filing_directory_url(cik, accession_number)}/{primary_document}"
+    return sec_filing_document_url(cik, accession_number, primary_document)

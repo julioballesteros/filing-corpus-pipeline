@@ -64,7 +64,7 @@ class SecFilingDocumentSource:
             document = self._client.get_filing_document(
                 cik=filing.issuer.provider_issuer_id,
                 accession_number=filing.provider_filing_id,
-                primary_document=filing.primary_document,
+                document_name=filing.primary_document,
                 max_bytes=self._config.max_document_bytes,
             )
         except SecRequestError as error:
