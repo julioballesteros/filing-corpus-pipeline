@@ -11,7 +11,11 @@ from filing_corpus_pipeline.discovery import (
     DiscoveryTarget,
 )
 from filing_corpus_pipeline.discovery.sec import SecFilingDiscoverySource
-from filing_corpus_pipeline.domain import FilingSelection, IssuerReference
+from filing_corpus_pipeline.domain import (
+    DocumentPolicy,
+    FilingSelection,
+    IssuerReference,
+)
 from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
 from filing_corpus_pipeline.sources.sec import (
     SEC_DATA_BASE_URL,
@@ -63,6 +67,7 @@ def columnar_payload(
     report_dates: list[str] | None = None,
     acceptance_datetimes: list[str] | None = None,
     primary_documents: list[str] | None = None,
+    items: list[str] | None = None,
 ) -> dict[str, object]:
     """Build the documented columnar shape returned by SEC submissions."""
     size = len(accessions)
@@ -73,6 +78,7 @@ def columnar_payload(
         "reportDate": report_dates or [""] * size,
         "acceptanceDateTime": acceptance_datetimes or [""] * size,
         "primaryDocument": primary_documents or ["filing.htm"] * size,
+        "items": items if items is not None else [""] * size,
     }
 
 
@@ -115,6 +121,7 @@ def build_client(
 def discovery_request(
     *,
     filing_types: tuple[str, ...] = ("10-K", "10-Q"),
+    selections: tuple[FilingSelection, ...] | None = None,
     filed_from: date = date(2024, 1, 1),
     filed_to: date = date(2026, 8, 31),
 ) -> DiscoveryRequest:
@@ -126,9 +133,13 @@ def discovery_request(
                     provider="sec",
                     provider_issuer_id="320193",
                 ),
-                selections=tuple(
-                    FilingSelection(filing_type=filing_type)
-                    for filing_type in filing_types
+                selections=(
+                    selections
+                    if selections is not None
+                    else tuple(
+                        FilingSelection(filing_type=filing_type)
+                        for filing_type in filing_types
+                    )
                 ),
             ),
         ),
@@ -244,12 +255,71 @@ def test_discovery_skips_nonoverlapping_historical_files() -> None:
     assert [call[0] for call in transport.calls] == [main_url]
 
 
-def test_sec_source_rejects_an_unsupported_route_before_http() -> None:
+def test_sec_source_discovers_only_item_2_02_as_an_earnings_release() -> None:
+    """An 8-K is not an earnings release merely because of its form type."""
+    main_url = f"{SEC_DATA_BASE_URL}/CIK0000320193.json"
+    transport = FakeTransport(
+        {
+            main_url: [
+                main_payload(
+                    columnar_payload(
+                        accessions=[
+                            "0000320193-26-000001",
+                            "0000320193-26-000002",
+                            "0000320193-26-000003",
+                        ],
+                        forms=["8-K", "8-K", "8-K/A"],
+                        filing_dates=["2026-08-01"] * 3,
+                        primary_documents=[
+                            "earnings-8k.htm",
+                            "other-8k.htm",
+                            "amended-8k.htm",
+                        ],
+                        items=["2.02, 9.01", "1.01,9.01", "2.02,9.01"],
+                    )
+                )
+            ]
+        }
+    )
+    service = DiscoveryService([SecFilingDiscoverySource(build_client(transport))])
+
+    result = service.execute(
+        discovery_request(
+            selections=(
+                FilingSelection(
+                    filing_type="8-K",
+                    document_policy=DocumentPolicy.EARNINGS_RELEASE,
+                ),
+            )
+        )
+    )
+
+    assert len(result.filings) == 1
+    filing = result.filings[0]
+    assert filing.provider_filing_id == "0000320193-26-000001"
+    assert filing.filing_type == "8-K"
+    assert filing.document_policy is DocumentPolicy.EARNINGS_RELEASE
+    assert filing.primary_document == "earnings-8k.htm"
+    assert filing.filing_detail_url.endswith(
+        "/320193/000032019326000001/0000320193-26-000001-index.html"
+    )
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        FilingSelection(filing_type="8-K"),
+        FilingSelection(filing_type="S-1"),
+    ],
+)
+def test_sec_source_rejects_an_unsupported_route_before_http(
+    selection: FilingSelection,
+) -> None:
     transport = FakeTransport({})
     service = DiscoveryService([SecFilingDiscoverySource(build_client(transport))])
 
     with pytest.raises(ValueError, match="unsupported SEC filing selection"):
-        service.execute(discovery_request(filing_types=("8-K",)))
+        service.execute(discovery_request(selections=(selection,)))
 
     assert transport.calls == []
 
@@ -435,6 +505,12 @@ def test_normalize_cik_adds_leading_zeroes() -> None:
             accessions=["0000320193-26-000001"],
             forms=[],
             filing_dates=["2026-08-01"],
+        ),
+        columnar_payload(
+            accessions=["0000320193-26-000001"],
+            forms=["8-K"],
+            filing_dates=["2026-08-01"],
+            items=[],
         ),
     ],
 )

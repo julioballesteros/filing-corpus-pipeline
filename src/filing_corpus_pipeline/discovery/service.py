@@ -19,7 +19,7 @@ class FilingDiscoverySource(Protocol):
     provider: str
 
     def validate_target(self, target: DiscoveryTarget) -> None:
-        """Reject a target the deployed source cannot process end to end."""
+        """Reject a target this source cannot discover."""
 
     def discover(self, request: DiscoveryRequest) -> list[FilingReference]:
         """Return filing references matching a homogeneous source request."""

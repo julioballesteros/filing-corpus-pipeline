@@ -73,6 +73,7 @@ class SecSubmission:
     report_date: date | None
     accepted_at: datetime | None
     primary_document: str
+    items: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +269,7 @@ def _parse_submission_rows(
         "reportDate",
         "acceptanceDateTime",
         "primaryDocument",
+        "items",
     )
     columns = {name: _string_list(payload, name) for name in column_names}
     row_count = len(columns["accessionNumber"])
@@ -305,6 +307,7 @@ def _parse_submission_rows(
                     context=f"acceptanceDateTime at row {index}",
                 ),
                 primary_document=primary_document,
+                items=_parse_filing_items(columns["items"][index]),
             )
         )
     return tuple(rows)
@@ -372,3 +375,8 @@ def _parse_optional_datetime(value: str, *, context: str) -> datetime | None:
             f"{context} is not an ISO datetime: {value!r}"
         ) from error
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _parse_filing_items(value: str) -> tuple[str, ...]:
+    """Normalize the SEC's comma-separated filing item metadata."""
+    return tuple(item.strip() for item in value.split(",") if item.strip())

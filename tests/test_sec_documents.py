@@ -9,7 +9,7 @@ from filing_corpus_pipeline.acquisition.sec import (
     SecDocumentConfig,
     SecFilingDocumentSource,
 )
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import DocumentPolicy, FilingReference
 from filing_corpus_pipeline.sources.http import HttpBytesResponse, HttpTransportError
 from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
 
@@ -144,7 +144,7 @@ def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
         ),
         (
             filing_reference().model_copy(
-                update={"document_policy": "earnings-release"}
+                update={"document_policy": DocumentPolicy.EARNINGS_RELEASE}
             ),
             "SEC_UNSUPPORTED_DOCUMENT_POLICY",
         ),

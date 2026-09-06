@@ -100,18 +100,20 @@ The target manifest contains stable internal company IDs and one or more
 regulator registrations per company. Filing selections belong to a
 registration, so two companies or two regulators need not share filing types or
 document policies. The service already routes targets through a provider
-registry; the deployed runtime currently registers only SEC and deliberately
-supports `10-K`/`primary` and `10-Q`/`primary`. The Lambda environment must
-contain `SEC_USER_AGENT` with a declared application name and monitored contact
-address.
+registry; the deployed runtime currently registers only SEC and supports
+discovery for `10-K`/`primary`, `10-Q`/`primary`, and
+`8-K`/`earnings-release`. Earnings releases are identified by SEC Item 2.02;
+the deployed target manifest keeps that route inactive until acquisition and
+normalization implement it. The Lambda environment must contain
+`SEC_USER_AGENT` with a declared application name and monitored contact address.
 
 Filing type codes are regulator-qualified strings, while document policies are
-closed capabilities implemented by the pipeline. This distinction leaves
-discovery extensible without pretending that downstream processing exists. A
-future SEC earnings-release route will be expressed as `8-K` plus an
-`earnings-release` document policy and resolved to the appropriate exhibit
-before acquisition; it will not treat every 8-K or EX-99.1 as an earnings
-release.
+closed capabilities implemented incrementally by pipeline stage. This
+distinction leaves discovery extensible without pretending that downstream
+processing exists. The SEC earnings-release route is expressed as `8-K` plus an
+`earnings-release` document policy; discovery requires Item 2.02 rather than
+treating every 8-K or EX-99.1 as an earnings release. Acquisition will later
+resolve the appropriate exhibit.
 
 For recurring runs, EventBridge Scheduler supplies only its execution time and
 the global rolling-window policy:

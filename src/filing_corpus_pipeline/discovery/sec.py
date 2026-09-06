@@ -14,10 +14,12 @@ class SecFilingDiscoverySource:
     """List and map SEC filings for a bounded set of registrants."""
 
     provider = "sec"
+    _earnings_release_item = "2.02"
     _supported_routes = frozenset(
         {
             ("10-K", DocumentPolicy.PRIMARY),
             ("10-Q", DocumentPolicy.PRIMARY),
+            ("8-K", DocumentPolicy.EARNINGS_RELEASE),
         }
     )
 
@@ -25,7 +27,7 @@ class SecFilingDiscoverySource:
         self._client = client
 
     def validate_target(self, target: DiscoveryTarget) -> None:
-        """Validate SEC identity and the pipeline routes deployed for it."""
+        """Validate SEC identity and the discovery routes implemented here."""
         if target.issuer.provider != self.provider:
             raise ValueError(
                 f"SEC discovery cannot process provider {target.issuer.provider!r}"
@@ -92,6 +94,11 @@ def _to_filing_reference(
     selection = selections.get(submission.form)
     if selection is None or not (
         request.filed_from <= submission.filed_on <= request.filed_to
+    ):
+        return None
+    if (
+        selection.document_policy is DocumentPolicy.EARNINGS_RELEASE
+        and SecFilingDiscoverySource._earnings_release_item not in submission.items
     ):
         return None
 

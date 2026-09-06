@@ -43,11 +43,13 @@ Adding a provider means implementing this retrieval contract beside `sec` and
 registering it during runtime composition. It does not require changing S3 or
 registry policy.
 
-The current SEC source accepts only the `primary` document policy. It does not
-infer exhibit semantics from a filing type. Non-primary policies such as a
-future 8-K earnings release require a source-specific document resolver before
-this boundary; acquisition then remains responsible only for validating and
-downloading the resolved document.
+The current SEC acquisition source accepts only the `primary` document policy.
+Discovery can identify an `8-K`/`earnings-release` filing from SEC Item 2.02,
+but that route remains absent from the deployed target manifest. Acquisition
+will reject it as `SEC_UNSUPPORTED_DOCUMENT_POLICY` until a source-specific
+resolver can inspect the filing document list, select the relevant exhibit, and
+then pass that resolved identity through the existing bounded download and
+storage flow.
 
 ## Object identity and idempotency
 

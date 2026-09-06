@@ -9,9 +9,10 @@ from filing_corpus_pipeline.models import NonEmptyString, PipelineModel
 
 
 class DocumentPolicy(StrEnum):
-    """Document-selection capabilities implemented by the deployed pipeline."""
+    """Stable document-selection intents whose support is stage-specific."""
 
     PRIMARY = "primary"
+    EARNINGS_RELEASE = "earnings-release"
 
 
 class FilingSelection(PipelineModel):

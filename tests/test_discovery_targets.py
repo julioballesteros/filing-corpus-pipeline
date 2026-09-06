@@ -18,7 +18,7 @@ from filing_corpus_pipeline.discovery.target_repository import (
     InvalidDiscoveryTargetError,
     RetryableDiscoveryTargetError,
 )
-from filing_corpus_pipeline.domain import FilingSelection
+from filing_corpus_pipeline.domain import DocumentPolicy, FilingSelection
 from filing_corpus_pipeline.storage.s3 import S3ObjectClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -364,7 +364,7 @@ def test_target_set_versions_require_json_integers(field: str, value: object) ->
             "filings": [
                 {
                     "filing_type": "8-K",
-                    "document_policy": "earnings-release",
+                    "document_policy": "all-exhibits",
                 }
             ],
         },
@@ -375,6 +375,28 @@ def test_registration_identity_and_filing_selections_are_canonical(
 ) -> None:
     with pytest.raises(ValueError):
         RegulatorRegistration.model_validate(registration)
+
+
+def test_target_contract_accepts_an_inactive_earnings_release_selection() -> None:
+    registration = RegulatorRegistration.model_validate(
+        {
+            "regulator": "sec",
+            "issuer_id": "0000320193",
+            "filings": [
+                {
+                    "filing_type": "8-K",
+                    "document_policy": "earnings-release",
+                }
+            ],
+        }
+    )
+
+    assert registration.filings == (
+        FilingSelection(
+            filing_type="8-K",
+            document_policy=DocumentPolicy.EARNINGS_RELEASE,
+        ),
+    )
 
 
 def test_source_controlled_development_target_set_matches_the_schema() -> None:
@@ -396,3 +418,9 @@ def test_source_controlled_development_target_set_matches_the_schema() -> None:
         "apple-inc",
         "microsoft-corp",
     }
+    assert all(
+        selection.document_policy.value == "primary"
+        for company in development_targets.companies
+        for registration in company.registrations
+        for selection in registration.filings
+    )
