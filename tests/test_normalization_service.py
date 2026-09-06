@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.normalization import (
     NormalizationOutcome,
     NormalizationRequest,
@@ -63,6 +63,13 @@ def filing() -> FilingReference:
 
 def raw_document() -> RawDocumentMetadata:
     return RawDocumentMetadata(
+        source_document=SourceDocumentReference(
+            document_name="aapl.htm",
+            provider_document_type="10-Q",
+            description=None,
+            source_url="https://example.test/aapl.htm",
+            resolver_version="sec-primary-v1",
+        ),
         bucket="raw-bucket",
         key="raw/sec/apple/filing/aapl.htm",
         sha256=DIGEST,

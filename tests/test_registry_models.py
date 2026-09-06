@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -39,11 +39,23 @@ def filing_reference() -> FilingReference:
 def raw_document() -> RawDocumentMetadata:
     """Build valid raw-object metadata."""
     return RawDocumentMetadata(
+        source_document=source_document(),
         bucket="filing-corpus-raw",
         key="raw/sec/0000320193/filing.htm",
         sha256="a" * 64,
         content_length=1024,
         content_type="text/html",
+    )
+
+
+def source_document() -> SourceDocumentReference:
+    """Build the provider document selected for acquisition."""
+    return SourceDocumentReference(
+        document_name="aapl-20250628.htm",
+        provider_document_type="10-Q",
+        description=None,
+        source_url="https://example.test/aapl-20250628.htm",
+        resolver_version="sec-primary-v1",
     )
 
 
@@ -141,6 +153,7 @@ def test_raw_document_metadata_validates_integrity_fields(
 ) -> None:
     """Incomplete object metadata cannot mark a filing as durable."""
     values: dict[str, object] = {
+        "source_document": source_document(),
         "bucket": "filing-corpus-raw",
         "key": "raw/filing.htm",
         "sha256": "a" * 64,

@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import AwareDatetime, field_validator
+from pydantic import AwareDatetime, Field, field_validator
 
 from filing_corpus_pipeline.models import NonEmptyString, PipelineModel
 
@@ -34,6 +34,16 @@ class IssuerReference(PipelineModel):
 
     provider: NonEmptyString
     provider_issuer_id: NonEmptyString
+
+
+class SourceDocumentReference(PipelineModel):
+    """Identity and selection provenance for the acquired source document."""
+
+    document_name: NonEmptyString = Field(max_length=512)
+    provider_document_type: NonEmptyString = Field(max_length=100)
+    description: NonEmptyString | None = Field(default=None, max_length=1000)
+    source_url: NonEmptyString = Field(max_length=2048)
+    resolver_version: NonEmptyString = Field(max_length=100)
 
 
 class FilingReference(PipelineModel):

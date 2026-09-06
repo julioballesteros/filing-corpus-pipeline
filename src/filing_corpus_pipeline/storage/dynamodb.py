@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import NoReturn, Protocol
 
+from filing_corpus_pipeline.domain import SourceDocumentReference
 from filing_corpus_pipeline.registry.models import (
     ClaimRequest,
     MarkFailedRequest,
@@ -18,7 +19,7 @@ from filing_corpus_pipeline.registry.models import (
     RawDocumentMetadata,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 AttributeValue = dict[str, object]
 DynamoItem = Mapping[str, object]
@@ -135,6 +136,11 @@ class DynamoDbRegistryClient:
             "#raw_sha256": "raw_sha256",
             "#raw_content_length": "raw_content_length",
             "#raw_content_type": "raw_content_type",
+            "#raw_source_document_name": "raw_source_document_name",
+            "#raw_source_document_type": "raw_source_document_type",
+            "#raw_source_document_description": "raw_source_document_description",
+            "#raw_source_url": "raw_source_url",
+            "#raw_resolver_version": "raw_resolver_version",
             "#raw_version_id": "raw_version_id",
             "#raw_etag": "raw_etag",
             "#raw_stored_at": "raw_stored_at",
@@ -153,6 +159,19 @@ class DynamoDbRegistryClient:
             ":raw_sha256": _string(request.document.sha256.lower()),
             ":raw_content_length": _number_value(request.document.content_length),
             ":raw_content_type": _string(request.document.content_type),
+            ":raw_source_document_name": _string(
+                request.document.source_document.document_name
+            ),
+            ":raw_source_document_type": _string(
+                request.document.source_document.provider_document_type
+            ),
+            ":raw_source_document_description": _optional_string(
+                request.document.source_document.description
+            ),
+            ":raw_source_url": _string(request.document.source_document.source_url),
+            ":raw_resolver_version": _string(
+                request.document.source_document.resolver_version
+            ),
             ":raw_version_id": _optional_string(request.document.version_id),
             ":raw_etag": _optional_string(request.document.etag),
             ":stored_at": _string(_timestamp(request.stored_at)),
@@ -164,6 +183,12 @@ class DynamoDbRegistryClient:
                 "#raw_key = :raw_key, #raw_sha256 = :raw_sha256, "
                 "#raw_content_length = :raw_content_length, "
                 "#raw_content_type = :raw_content_type, "
+                "#raw_source_document_name = :raw_source_document_name, "
+                "#raw_source_document_type = :raw_source_document_type, "
+                "#raw_source_document_description = "
+                ":raw_source_document_description, "
+                "#raw_source_url = :raw_source_url, "
+                "#raw_resolver_version = :raw_resolver_version, "
                 "#raw_version_id = :raw_version_id, #raw_etag = :raw_etag, "
                 "#raw_stored_at = :stored_at, #updated_at = :stored_at "
                 "REMOVE #claim_owner, #lease_expires_at_epoch, "
@@ -292,6 +317,7 @@ class DynamoDbRegistryClient:
             "normalization_retryable",
             "normalization_parser_version",
             *_raw_fields(),
+            *_legacy_raw_source_fields(),
             *_corpus_fields(),
         )
         names = _normalization_attribute_names(*fields)
@@ -569,8 +595,21 @@ def _raw_fields() -> tuple[str, ...]:
         "raw_sha256",
         "raw_content_length",
         "raw_content_type",
+        "raw_source_document_name",
+        "raw_source_document_type",
+        "raw_source_document_description",
+        "raw_source_url",
+        "raw_resolver_version",
         "raw_version_id",
         "raw_etag",
+    )
+
+
+def _legacy_raw_source_fields() -> tuple[str, ...]:
+    return (
+        "primary_document",
+        "filing_type",
+        "primary_document_url",
     )
 
 
@@ -632,6 +671,7 @@ def _parse_normalization_item(value: object) -> StoredNormalizationItem | None:
     item = _validated_item(value, field="normalization registry item")
     try:
         raw_document = RawDocumentMetadata(
+            source_document=_parse_raw_source_document(item),
             bucket=_text(item, "raw_bucket"),
             key=_text(item, "raw_key"),
             sha256=_text(item, "raw_sha256"),
@@ -659,6 +699,31 @@ def _parse_normalization_item(value: object) -> StoredNormalizationItem | None:
         owner_id=_optional_text(item, "normalization_owner"),
         retryable=_optional_boolean(item, "normalization_retryable"),
         corpus=corpus,
+    )
+
+
+def _parse_raw_source_document(item: DynamoItem) -> SourceDocumentReference:
+    source_fields = (
+        "raw_source_document_name",
+        "raw_source_document_type",
+        "raw_source_document_description",
+        "raw_source_url",
+        "raw_resolver_version",
+    )
+    if any(field in item for field in source_fields):
+        return SourceDocumentReference(
+            document_name=_text(item, "raw_source_document_name"),
+            provider_document_type=_text(item, "raw_source_document_type"),
+            description=_nullable_text(item, "raw_source_document_description"),
+            source_url=_text(item, "raw_source_url"),
+            resolver_version=_text(item, "raw_resolver_version"),
+        )
+    return SourceDocumentReference(
+        document_name=_text(item, "primary_document"),
+        provider_document_type=_text(item, "filing_type"),
+        description=None,
+        source_url=_text(item, "primary_document_url"),
+        resolver_version="legacy-primary-v1",
     )
 
 

@@ -111,6 +111,10 @@ def test_sec_source_retrieves_the_canonical_bounded_document() -> None:
     result = document_source.retrieve(filing_reference())
 
     assert result.body == b"<html>filing</html>"
+    assert result.source_document.document_name == "aapl-20250628.htm"
+    assert result.source_document.provider_document_type == "10-Q"
+    assert result.source_document.source_url == filing_reference().primary_document_url
+    assert result.source_document.resolver_version == "sec-primary-v1"
     assert result.source_etag == '"source-etag"'
     assert transport.calls[0]["url"] == filing_reference().primary_document_url
     assert transport.calls[0]["max_bytes"] == 100

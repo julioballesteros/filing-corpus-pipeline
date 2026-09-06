@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -301,6 +301,13 @@ def raw_stored_request() -> MarkRawStoredRequest:
         owner_id="execution-1",
         stored_at=datetime(2025, 8, 1, tzinfo=UTC),
         document=RawDocumentMetadata(
+            source_document=SourceDocumentReference(
+                document_name="filing.htm",
+                provider_document_type="10-Q",
+                description=None,
+                source_url="https://example.test/filing.htm",
+                resolver_version="sec-primary-v1",
+            ),
             bucket="bucket",
             key="raw/filing.htm",
             sha256="a" * 64,

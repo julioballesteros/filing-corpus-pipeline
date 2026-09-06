@@ -14,6 +14,7 @@ from filing_corpus_pipeline.normalization import (
     composition as normalization_composition,
 )
 from filing_corpus_pipeline.runtime import aws as runtime_aws
+from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
 
 def test_discovery_composition_builds_the_sec_service() -> None:
@@ -64,8 +65,8 @@ def test_acquisition_composition_builds_aws_storage_and_sec_source(
 
     monkeypatch.setattr(acquisition_composition, "aws_client", aws_client)
 
-    service = acquisition_composition.build_sec_acquisition_service(
-        user_agent="pipeline contact@example.com",
+    service = acquisition_composition.build_acquisition_service(
+        sec_user_agent="pipeline contact@example.com",
         registry_table_name="filing-registry",
         raw_bucket_name="filing-corpus-raw",
         max_document_bytes=1024,
@@ -73,6 +74,37 @@ def test_acquisition_composition_builds_aws_storage_and_sec_source(
 
     assert isinstance(service, AcquisitionService)
     assert services == ["dynamodb", "s3"]
+
+
+def test_acquisition_composition_reads_source_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Source credentials and policy stay inside the composition root."""
+    monkeypatch.setenv("SEC_USER_AGENT", "pipeline contact@example.com")
+    monkeypatch.setattr(acquisition_composition, "aws_client", lambda _: object())
+
+    assert isinstance(
+        acquisition_composition.build_acquisition_service(
+            registry_table_name="filing-registry",
+            raw_bucket_name="filing-corpus-raw",
+            max_document_bytes=1024,
+        ),
+        AcquisitionService,
+    )
+
+
+def test_acquisition_composition_requires_source_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing SEC setting fails at the source-composition boundary."""
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+
+    with pytest.raises(LambdaConfigurationError, match="SEC_USER_AGENT"):
+        acquisition_composition.build_acquisition_service(
+            registry_table_name="filing-registry",
+            raw_bucket_name="filing-corpus-raw",
+            max_document_bytes=1024,
+        )
 
 
 def test_acquisition_composition_loads_the_managed_runtime_sdk(

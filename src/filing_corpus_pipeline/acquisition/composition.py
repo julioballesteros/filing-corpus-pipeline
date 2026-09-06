@@ -9,6 +9,7 @@ from filing_corpus_pipeline.acquisition.sec import (
 from filing_corpus_pipeline.acquisition.service import AcquisitionService
 from filing_corpus_pipeline.registry import FilingRegistryService
 from filing_corpus_pipeline.runtime.aws import aws_client
+from filing_corpus_pipeline.runtime.config import required_environment
 from filing_corpus_pipeline.sources.http import UrllibHttpTransport
 from filing_corpus_pipeline.sources.sec import SecEdgarClient, SecEdgarClientConfig
 from filing_corpus_pipeline.storage.dynamodb import (
@@ -19,14 +20,19 @@ from filing_corpus_pipeline.storage.raw_documents import S3RawDocumentClient
 from filing_corpus_pipeline.storage.s3 import S3Api
 
 
-def build_sec_acquisition_service(
+def build_acquisition_service(
     *,
-    user_agent: str,
     registry_table_name: str,
     raw_bucket_name: str,
     max_document_bytes: int,
+    sec_user_agent: str | None = None,
 ) -> AcquisitionService:
-    """Wire the SEC source to concrete DynamoDB and S3 storage clients."""
+    """Compose storage and all document sources enabled in this runtime."""
+    user_agent = (
+        sec_user_agent
+        if sec_user_agent is not None
+        else required_environment("SEC_USER_AGENT")
+    )
     dynamodb = DynamoDbRegistryClient(
         cast(DynamoDbApi, aws_client("dynamodb")),
         table_name=registry_table_name,

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pydantic import ValidationError
 
 from filing_corpus_pipeline.acquisition.composition import (
-    build_sec_acquisition_service,
+    build_acquisition_service,
 )
 from filing_corpus_pipeline.acquisition.models import AcquisitionRequest
 from filing_corpus_pipeline.acquisition.service import AcquisitionError
@@ -30,7 +30,6 @@ class InvalidAcquisitionEvent(ValueError):
 def handler(event: object, context: object) -> dict[str, object]:
     """Acquire one filing and return only its disposition and S3 metadata."""
     del context
-    user_agent = required_environment("SEC_USER_AGENT")
     registry_table_name = required_environment("REGISTRY_TABLE_NAME")
     raw_bucket_name = required_environment("RAW_BUCKET_NAME")
     lease_seconds = positive_environment_integer(
@@ -45,8 +44,7 @@ def handler(event: object, context: object) -> dict[str, object]:
         event,
         lease_duration=timedelta(seconds=lease_seconds),
     )
-    service = build_sec_acquisition_service(
-        user_agent=user_agent,
+    service = build_acquisition_service(
         registry_table_name=registry_table_name,
         raw_bucket_name=raw_bucket_name,
         max_document_bytes=max_document_bytes,

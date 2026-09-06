@@ -13,7 +13,7 @@ from filing_corpus_pipeline.acquisition.models import (
     RetrievedDocument,
     raw_document_key,
 )
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -110,12 +110,15 @@ class AcquisitionService:
             digest = sha256(retrieved.body).hexdigest()
             stored = self._raw_storage.store(
                 RawObjectWrite(
-                    key=_validated_object_key(request.filing),
+                    key=_validated_object_key(
+                        request.filing,
+                        retrieved.source_document,
+                    ),
                     body=retrieved.body,
                     sha256=digest,
                     content_type=retrieved.content_type,
                     filing_key=claim.filing_key,
-                    source_url=retrieved.source_url,
+                    source_document=retrieved.source_document,
                     source_etag=retrieved.source_etag,
                     source_last_modified=retrieved.source_last_modified,
                 )
@@ -138,6 +141,7 @@ class AcquisitionService:
             ) from error
 
         metadata = RawDocumentMetadata(
+            source_document=retrieved.source_document,
             bucket=stored.bucket,
             key=stored.key,
             sha256=digest,
@@ -204,9 +208,12 @@ def _duplicate_outcome(outcome: ClaimOutcome) -> AcquisitionOutcome:
         raise AssertionError(f"acquired claim was not handled: {outcome}") from error
 
 
-def _validated_object_key(filing: FilingReference) -> str:
+def _validated_object_key(
+    filing: FilingReference,
+    source_document: SourceDocumentReference,
+) -> str:
     try:
-        return raw_document_key(filing)
+        return raw_document_key(filing, source_document)
     except ValueError as error:
         raise DocumentRetrievalError(
             str(error),

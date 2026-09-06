@@ -7,6 +7,7 @@ from typing import ClassVar, cast
 
 import pytest
 
+from filing_corpus_pipeline.domain import SourceDocumentReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 from filing_corpus_pipeline.storage.normalized_corpus import (
     NormalizedCorpusWrite,
@@ -98,6 +99,17 @@ BODY = b"<html>filing</html>"
 DIGEST = sha256(BODY).hexdigest()
 
 
+def source_document() -> SourceDocumentReference:
+    """Build the selected provider document stored as raw provenance."""
+    return SourceDocumentReference(
+        document_name="report.htm",
+        provider_document_type="10-Q",
+        description=None,
+        source_url="https://www.sec.gov/report.htm",
+        resolver_version="sec-primary-v1",
+    )
+
+
 def write_request() -> RawObjectWrite:
     """Build a complete object write with source provenance."""
     return RawObjectWrite(
@@ -106,7 +118,7 @@ def write_request() -> RawObjectWrite:
         sha256=DIGEST,
         content_type="text/html",
         filing_key="sec#accession",
-        source_url="https://www.sec.gov/report.htm",
+        source_document=source_document(),
         source_etag='"source"',
         source_last_modified="Fri, 01 Aug 2025 18:00:00 GMT",
     )
@@ -134,6 +146,10 @@ def test_store_creates_an_encrypted_checksum_verified_object_once() -> None:
     assert isinstance(metadata, dict)
     assert metadata["sha256"] == DIGEST
     assert metadata["source-etag"] == '"source"'
+    assert metadata["source-url"] == "https://www.sec.gov/report.htm"
+    assert metadata["source-document-name"] == "report.htm"
+    assert metadata["source-document-type"] == "10-Q"
+    assert metadata["resolver-version"] == "sec-primary-v1"
     assert result.version_id == "version-1"
     assert result.etag == "etag-1"
     assert result.reused is False
@@ -240,7 +256,7 @@ def test_raw_object_write_rejects_incomplete_integrity_values(
         "sha256": DIGEST,
         "content_type": "text/html",
         "filing_key": "sec#filing",
-        "source_url": "https://www.sec.gov/report.htm",
+        "source_document": source_document(),
     }
     values.update(overrides)
 
@@ -256,6 +272,7 @@ def test_storage_requires_a_bucket_name() -> None:
 
 def raw_metadata(**overrides: object) -> RawDocumentMetadata:
     values: dict[str, object] = {
+        "source_document": source_document(),
         "bucket": "filing-corpus-raw",
         "key": "raw/sec/320193/accession/report.htm",
         "sha256": DIGEST,

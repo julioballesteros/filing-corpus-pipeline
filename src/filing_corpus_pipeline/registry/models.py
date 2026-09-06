@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from pydantic import AwareDatetime, Field, field_validator
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.models import (
     NonEmptyString,
     PipelineModel,
@@ -90,6 +90,7 @@ class ClaimResult(PipelineModel):
 class RawDocumentMetadata(PipelineModel):
     """Durable location and integrity metadata for an acquired document."""
 
+    source_document: SourceDocumentReference
     bucket: NonEmptyString
     key: NonEmptyString
     sha256: Sha256Digest

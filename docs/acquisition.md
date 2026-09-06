@@ -1,8 +1,9 @@
 # Raw filing acquisition contract
 
-Acquisition turns one provider-neutral, already-resolved `FilingReference` into
-a durable, integrity-checked source object. Terraform deploys it as a dedicated
-Lambda invoked once per filing by a bounded Step Functions `Map`.
+Acquisition turns one provider-neutral `FilingReference` and its document
+selection policy into a durable, integrity-checked source object. Terraform
+deploys it as a dedicated Lambda invoked once per filing by a bounded Step
+Functions `Map`.
 
 ## One invocation
 
@@ -13,8 +14,8 @@ FilingReference
 conditional DynamoDB claim
      │ acquired
      ▼
-provider document source ── bounded HTTP GET
-     │ bytes + response metadata
+provider document source ── select + bounded HTTP GET
+     │ selected identity + bytes + response metadata
      ▼
 SHA-256 + deterministic S3 key
      │
@@ -26,7 +27,8 @@ owned registry transition to RAW_STORED
 ```
 
 The service result contains only the registry key, disposition, attempt count,
-and S3 metadata. Filing bytes never cross a Step Functions state boundary.
+selected-document provenance, and S3 metadata. Filing bytes never cross a Step
+Functions state boundary.
 
 ## Provider boundary
 
@@ -40,23 +42,26 @@ input before HTTP, supplies the required declared user agent, imposes a timeout,
 and caps the response at 25 MiB by default.
 
 Adding a provider means implementing this retrieval contract beside `sec` and
-registering it during runtime composition. It does not require changing S3 or
-registry policy.
+registering it during runtime composition. The Lambda handler and application
+service remain source-neutral; source-specific configuration is loaded by the
+composition root. A new provider does not require changing S3 or registry
+policy.
 
 The current SEC acquisition source accepts only the `primary` document policy.
 Discovery can identify an `8-K`/`earnings-release` filing from SEC Item 2.02,
 but that route remains absent from the deployed target manifest. Acquisition
 will reject it as `SEC_UNSUPPORTED_DOCUMENT_POLICY` until a source-specific
-resolver can inspect the filing document list, select the relevant exhibit, and
-then pass that resolved identity through the existing bounded download and
-storage flow.
+resolver can inspect the filing document list and select the relevant exhibit.
+The provider-neutral `SourceDocumentReference` contract is already in place for
+that next step. It records the actual document name, provider document type,
+optional description, canonical URL, and resolver version alongside the bytes.
 
 ## Object identity and idempotency
 
 Raw documents use this deterministic key:
 
 ```text
-raw/{provider}/{provider_issuer_id}/{provider_filing_id}/{primary_document}
+raw/{provider}/{provider_issuer_id}/{provider_filing_id}/{source_document_name}
 ```
 
 Each identity segment is percent-escaped independently. The S3 client sends a
@@ -67,8 +72,11 @@ bytes at the same deterministic key are a permanent `RAW_OBJECT_COLLISION`, not
 an overwrite.
 
 The registry retains bucket, key, SHA-256, length, content type, S3 version ID,
-and ETag. S3 object metadata also retains the filing key, source URL, and
-available source ETag/Last-Modified headers.
+ETag, and the complete `SourceDocumentReference`. S3 object metadata also
+retains the filing key, selected document name and type, source URL, resolver
+version, and available source ETag/Last-Modified headers. This prevents an
+earnings-release exhibit from being mislabeled as the filing's primary
+document when exhibit resolution is added.
 
 ## Failure and recovery behavior
 

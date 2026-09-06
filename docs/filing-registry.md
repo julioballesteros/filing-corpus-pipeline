@@ -18,14 +18,23 @@ The first successful claim stores:
 | Source metadata | issuer, filing type, document policy, filing/report dates, source URLs and primary document |
 | Claim | `status`, `claim_owner`, `lease_expires_at_epoch`, `attempt_count` |
 | Audit | `first_discovered_at`, `last_claimed_at`, `updated_at`, `schema_version` |
-| Raw object | S3 bucket/key/version, ETag, SHA-256, length, content type and storage timestamp |
+| Raw object | S3 bucket/key/version, ETag, SHA-256, length, content type, selected source-document identity and storage timestamp |
 | Normalization claim | owner, lease expiry, parser version, attempt count and last claim time |
 | Corpus | normalized bucket/prefix, manifest and block keys/digests, schema/parser versions, quality status and counts |
 | Failures | separate bounded acquisition and normalization error fields, timestamps and retryability |
 
-Nullable filing metadata uses DynamoDB `NULL` values rather than missing fields,
-making the version-two shape explicit. Claim and failure attributes are removed
-when they no longer describe the current state.
+Nullable filing metadata uses DynamoDB `NULL` values rather than missing fields.
+Schema version three adds acquisition-time source provenance:
+`raw_source_document_name`, `raw_source_document_type`,
+`raw_source_document_description`, `raw_source_url`, and
+`raw_resolver_version`. Claim and failure attributes are removed when they no
+longer describe the current state.
+
+Normalization remains compatible with schema-version-two items already stored
+before this addition. When the new raw-source fields are entirely absent, it
+reconstructs the selected identity from `primary_document`, `filing_type`, and
+`primary_document_url` and labels it `legacy-primary-v1`. A partial version-three
+provenance record is rejected as corrupt rather than silently mixing schemas.
 
 ## State transitions
 
@@ -54,9 +63,10 @@ worker's result.
 
 Normalization uses separate owner/lease/attempt/failure attributes, so it does
 not erase acquisition provenance. Only `NORMALIZING` owned by the caller may
-become `NORMALIZED` or `NORMALIZATION_FAILED`. The raw object metadata remains
-available in every post-acquisition state and is the source identity used by
-normalization; Step Functions never needs to carry S3 metadata between tasks.
+become `NORMALIZED` or `NORMALIZATION_FAILED`. The raw object metadata and the
+identity of the document actually selected by acquisition remain available in
+every post-acquisition state; Step Functions never needs to carry S3 metadata
+between tasks.
 
 ## Atomic claim behavior
 

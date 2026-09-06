@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import (
     ClaimRequest,
     FailureDetails,
@@ -96,6 +96,17 @@ def storage(api: StubDynamoDbApi) -> DynamoDbRegistryClient:
     return DynamoDbRegistryClient(api, table_name="filing-registry")
 
 
+def source_document() -> SourceDocumentReference:
+    """Build the concrete source document selected during acquisition."""
+    return SourceDocumentReference(
+        document_name="aapl-20250628.htm",
+        provider_document_type="10-Q",
+        description=None,
+        source_url="https://example.test/aapl-20250628.htm",
+        resolver_version="sec-primary-v1",
+    )
+
+
 def test_claim_serializes_an_atomic_conditional_update() -> None:
     """The storage client emits one race-safe write for a new claim."""
     api = StubDynamoDbApi()
@@ -116,7 +127,7 @@ def test_claim_serializes_an_atomic_conditional_update() -> None:
     assert values[":company_id"] == {"S": "apple-inc"}
     assert values[":filing_type"] == {"S": "10-Q"}
     assert values[":document_policy"] == {"S": "primary"}
-    assert values[":schema_version"] == {"N": "2"}
+    assert values[":schema_version"] == {"N": "3"}
 
 
 def test_claim_deserializes_the_previous_registry_item() -> None:
@@ -195,6 +206,7 @@ def raw_stored_request() -> MarkRawStoredRequest:
         owner_id="execution-1",
         stored_at=datetime(2025, 8, 1, 18, 1, tzinfo=UTC),
         document=RawDocumentMetadata(
+            source_document=source_document(),
             bucket="filing-corpus-raw",
             key="raw/sec/0000320193/filing.htm",
             sha256="A" * 64,
@@ -222,6 +234,11 @@ def test_mark_raw_stored_serializes_integrity_metadata() -> None:
     assert values[":raw_content_length"] == {"N": "1024"}
     assert values[":raw_version_id"] == {"S": "version-1"}
     assert values[":raw_etag"] == {"S": "etag-1"}
+    assert values[":raw_source_document_name"] == {"S": "aapl-20250628.htm"}
+    assert values[":raw_source_document_type"] == {"S": "10-Q"}
+    assert values[":raw_source_document_description"] == {"NULL": True}
+    assert values[":raw_source_url"] == {"S": "https://example.test/aapl-20250628.htm"}
+    assert values[":raw_resolver_version"] == {"S": "sec-primary-v1"}
     assert "REMOVE #claim_owner, #lease_expires_at_epoch" in str(
         call["UpdateExpression"]
     )
@@ -295,6 +312,11 @@ def raw_attributes() -> dict[str, object]:
         "raw_sha256": {"S": "a" * 64},
         "raw_content_length": {"N": "1024"},
         "raw_content_type": {"S": "text/html"},
+        "raw_source_document_name": {"S": "aapl-20250628.htm"},
+        "raw_source_document_type": {"S": "10-Q"},
+        "raw_source_document_description": {"NULL": True},
+        "raw_source_url": {"S": "https://example.test/aapl-20250628.htm"},
+        "raw_resolver_version": {"S": "sec-primary-v1"},
         "raw_version_id": {"S": "version-1"},
         "raw_etag": {"NULL": True},
     }
@@ -325,6 +347,7 @@ def test_claim_normalization_serializes_lease_and_returns_raw_metadata() -> None
     assert previous.status == "RAW_STORED"
     assert previous.attempt_count == 0
     assert previous.raw_document.version_id == "version-1"
+    assert previous.raw_document.source_document == source_document()
     call = api.update_calls[0]
     assert "#status = :raw_stored" in str(call["ConditionExpression"])
     assert "#normalization_parser_version <> :parser_version" in str(
@@ -333,6 +356,43 @@ def test_claim_normalization_serializes_lease_and_returns_raw_metadata() -> None
     values = call["ExpressionAttributeValues"]
     assert isinstance(values, dict)
     assert values[":lease_expires_at_epoch"] == {"N": "1754071800"}
+
+
+def test_claim_normalization_reads_legacy_primary_document_provenance() -> None:
+    """Schema-v2 raw filings remain usable after provenance becomes explicit."""
+    legacy = {
+        key: value
+        for key, value in raw_attributes().items()
+        if not key.startswith("raw_source_") and key != "raw_resolver_version"
+    }
+    legacy.update(
+        {
+            "primary_document": {"S": "legacy.htm"},
+            "filing_type": {"S": "10-Q"},
+            "primary_document_url": {"S": "https://example.test/legacy.htm"},
+        }
+    )
+    api = StubDynamoDbApi(updates=[{"Attributes": legacy}])
+
+    previous = storage(api).claim_normalization(normalization_claim_request())
+
+    assert previous.raw_document.source_document == SourceDocumentReference(
+        document_name="legacy.htm",
+        provider_document_type="10-Q",
+        description=None,
+        source_url="https://example.test/legacy.htm",
+        resolver_version="legacy-primary-v1",
+    )
+
+
+def test_claim_normalization_rejects_partial_source_provenance() -> None:
+    """A partially written schema-v3 source identity fails closed."""
+    malformed = raw_attributes()
+    del malformed["raw_resolver_version"]
+    api = StubDynamoDbApi(updates=[{"Attributes": malformed}])
+
+    with pytest.raises(InvalidDynamoDbItemError, match="raw_resolver_version"):
+        storage(api).claim_normalization(normalization_claim_request())
 
 
 def test_get_normalization_deserializes_committed_corpus_metadata() -> None:

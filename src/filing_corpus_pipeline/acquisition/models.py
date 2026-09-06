@@ -6,19 +6,22 @@ from urllib.parse import quote
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.models import NonEmptyString, PipelineModel
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 
 
-def raw_document_key(filing: FilingReference) -> str:
+def raw_document_key(
+    filing: FilingReference,
+    source_document: SourceDocumentReference,
+) -> str:
     """Build the deterministic S3 key for a provider filing document."""
     segments = (
         "raw",
         filing.provider,
         filing.issuer.provider_issuer_id,
         filing.provider_filing_id,
-        filing.primary_document,
+        source_document.document_name,
     )
     key = "/".join(quote(segment, safe="") for segment in segments)
     if len(key.encode()) > 1024:
@@ -41,9 +44,9 @@ class AcquisitionRequest(PipelineModel):
 class RetrievedDocument(PipelineModel):
     """Raw bytes and response metadata returned by a filing source."""
 
+    source_document: SourceDocumentReference
     body: bytes
     content_type: NonEmptyString
-    source_url: NonEmptyString
     source_etag: str | None = None
     source_last_modified: str | None = None
 

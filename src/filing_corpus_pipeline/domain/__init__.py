@@ -5,6 +5,7 @@ from filing_corpus_pipeline.domain.filings import (
     FilingReference,
     FilingSelection,
     IssuerReference,
+    SourceDocumentReference,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "FilingReference",
     "FilingSelection",
     "IssuerReference",
+    "SourceDocumentReference",
 ]

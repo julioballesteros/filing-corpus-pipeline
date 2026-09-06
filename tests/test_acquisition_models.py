@@ -12,7 +12,7 @@ from filing_corpus_pipeline.acquisition import (
     RetrievedDocument,
     raw_document_key,
 )
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 
 
@@ -37,6 +37,7 @@ def filing_reference() -> FilingReference:
 def document_metadata() -> RawDocumentMetadata:
     """Build metadata used by a successful result."""
     return RawDocumentMetadata(
+        source_document=source_document(),
         bucket="bucket",
         key="key",
         sha256="a" * 64,
@@ -45,19 +46,36 @@ def document_metadata() -> RawDocumentMetadata:
     )
 
 
+def source_document(
+    *, document_name: str = "report one.htm"
+) -> SourceDocumentReference:
+    """Build the actual document selected by a provider source."""
+    return SourceDocumentReference(
+        document_name=document_name,
+        provider_document_type="annual-report",
+        description=None,
+        source_url="https://example.test/report",
+        resolver_version="provider-primary-v1",
+    )
+
+
 def test_raw_document_key_escapes_each_identity_segment() -> None:
     """Provider delimiters cannot alter the deterministic object hierarchy."""
-    assert raw_document_key(filing_reference()) == (
+    assert raw_document_key(filing_reference(), source_document()) == (
         "raw/provider%2Fone/issuer%2F1/filing%20%231/report%20one.htm"
     )
 
 
 def test_raw_document_key_rejects_s3_keys_over_the_limit() -> None:
     """Unexpectedly large provider IDs fail before an S3 call."""
-    filing = filing_reference().model_copy(update={"primary_document": "x" * 1020})
-
+    filing = FilingReference.model_validate(
+        {
+            **filing_reference().model_dump(),
+            "provider_issuer_id": "x" * 1020,
+        }
+    )
     with pytest.raises(ValueError, match="key size"):
-        raw_document_key(filing)
+        raw_document_key(filing, source_document())
 
 
 @pytest.mark.parametrize(
@@ -89,12 +107,17 @@ def test_retrieved_document_requires_response_metadata() -> None:
     """A provider result must identify its content type and source URL."""
     with pytest.raises(ValueError):
         RetrievedDocument(
+            source_document=source_document(),
             body=b"body",
             content_type="",
-            source_url="https://example.test",
         )
     with pytest.raises(ValueError):
-        RetrievedDocument(body=b"body", content_type="text/html", source_url="")
+        SourceDocumentReference.model_validate(
+            {
+                **source_document().model_dump(),
+                "source_url": "",
+            }
+        )
 
 
 def test_acquisition_result_enforces_document_invariant() -> None:
@@ -112,6 +135,13 @@ def test_acquisition_result_enforces_document_invariant() -> None:
         "outcome": "RAW_STORED",
         "attempt_count": 1,
         "document": {
+            "source_document": {
+                "document_name": "report one.htm",
+                "provider_document_type": "annual-report",
+                "description": None,
+                "source_url": "https://example.test/report",
+                "resolver_version": "provider-primary-v1",
+            },
             "bucket": "bucket",
             "key": "key",
             "sha256": "a" * 64,

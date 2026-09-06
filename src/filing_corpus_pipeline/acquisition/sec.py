@@ -6,7 +6,11 @@ from filing_corpus_pipeline.acquisition.models import (
     DocumentRetrievalError,
     RetrievedDocument,
 )
-from filing_corpus_pipeline.domain import DocumentPolicy, FilingReference
+from filing_corpus_pipeline.domain import (
+    DocumentPolicy,
+    FilingReference,
+    SourceDocumentReference,
+)
 from filing_corpus_pipeline.sources.sec import (
     SecEdgarClient,
     SecRequestError,
@@ -30,6 +34,7 @@ class SecFilingDocumentSource:
     """Retrieve the canonical primary document for an SEC filing reference."""
 
     provider = "sec"
+    _primary_resolver_version = "sec-primary-v1"
 
     def __init__(
         self,
@@ -80,9 +85,15 @@ class SecFilingDocumentSource:
                 retryable=False,
             )
         return RetrievedDocument(
+            source_document=SourceDocumentReference(
+                document_name=filing.primary_document,
+                provider_document_type=filing.filing_type,
+                description=None,
+                source_url=document.source_url,
+                resolver_version=self._primary_resolver_version,
+            ),
             body=document.body,
             content_type=document.content_type,
-            source_url=document.source_url,
             source_etag=document.etag,
             source_last_modified=document.last_modified,
         )

@@ -160,7 +160,7 @@ variable "acquisition_lease_seconds" {
 }
 
 variable "acquisition_max_document_bytes" {
-  description = "Maximum SEC primary-document response size accepted by acquisition."
+  description = "Maximum source-document response size accepted by acquisition."
   type        = number
   default     = 26214400
 

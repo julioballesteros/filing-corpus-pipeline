@@ -8,6 +8,7 @@ from typing import NoReturn
 
 from pydantic import Field
 
+from filing_corpus_pipeline.domain import SourceDocumentReference
 from filing_corpus_pipeline.models import (
     NonEmptyString,
     PipelineModel,
@@ -50,7 +51,7 @@ class RawObjectWrite(PipelineModel):
     sha256: Sha256Digest
     content_type: NonEmptyString
     filing_key: NonEmptyString
-    source_url: NonEmptyString
+    source_document: SourceDocumentReference
     source_etag: str | None = None
     source_last_modified: str | None = None
 
@@ -81,7 +82,10 @@ class S3RawDocumentClient:
         metadata = {
             "sha256": request.sha256.lower(),
             "filing-key": request.filing_key,
-            "source-url": request.source_url,
+            "source-url": request.source_document.source_url,
+            "source-document-name": request.source_document.document_name,
+            "source-document-type": request.source_document.provider_document_type,
+            "resolver-version": request.source_document.resolver_version,
         }
         if request.source_etag is not None:
             metadata["source-etag"] = request.source_etag

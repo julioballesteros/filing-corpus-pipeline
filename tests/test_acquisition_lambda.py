@@ -12,7 +12,7 @@ from filing_corpus_pipeline.acquisition import (
 )
 from filing_corpus_pipeline.acquisition import handler as acquisition_handler
 from filing_corpus_pipeline.acquisition.handler import InvalidAcquisitionEvent
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import RawDocumentMetadata
 from filing_corpus_pipeline.runtime.config import LambdaConfigurationError
 
@@ -77,6 +77,13 @@ def stored_result() -> AcquisitionResult:
         outcome=AcquisitionOutcome.RAW_STORED,
         attempt_count=1,
         document=RawDocumentMetadata(
+            source_document=SourceDocumentReference(
+                document_name="aapl-20250628.htm",
+                provider_document_type="10-Q",
+                description=None,
+                source_url="https://www.sec.gov/report.htm",
+                resolver_version="sec-primary-v1",
+            ),
             bucket="filing-corpus-raw",
             key="raw/sec/filing.htm",
             sha256="a" * 64,
@@ -102,7 +109,7 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
 
     monkeypatch.setattr(
         acquisition_handler,
-        "build_sec_acquisition_service",
+        "build_acquisition_service",
         build_service,
     )
 
@@ -112,7 +119,6 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
     assert "body" not in str(result)
     assert composition_calls == [
         {
-            "user_agent": "pipeline contact@example.com",
             "registry_table_name": "filing-registry",
             "raw_bucket_name": "filing-corpus-raw",
             "max_document_bytes": 25 * 1024 * 1024,
@@ -137,7 +143,7 @@ def test_handler_preserves_retryable_error_type(
     service = CapturingAcquisitionService(failure)
     monkeypatch.setattr(
         acquisition_handler,
-        "build_sec_acquisition_service",
+        "build_acquisition_service",
         lambda **_: service,
     )
 
@@ -195,7 +201,6 @@ def test_parser_translates_invalid_lease_policy() -> None:
 @pytest.mark.parametrize(
     "missing_name",
     [
-        "SEC_USER_AGENT",
         "REGISTRY_TABLE_NAME",
         "RAW_BUCKET_NAME",
         "ACQUISITION_LEASE_SECONDS",

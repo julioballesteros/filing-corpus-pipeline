@@ -174,6 +174,13 @@ validate runtime input and configuration, invoke the service, log the bounded
 result, and serialize it. Shared SEC HTTP mechanics do not import feature or
 pipeline-domain models.
 
+Acquisition resolves the concrete provider document behind the selection
+policy and returns a `source_document` identity with its S3 metadata. That
+identity records the actual document name/type, URL, and resolver version, so a
+future 8-K exhibit can flow through the generic service without being confused
+with the filing's primary document. The SEC implementation still accepts only
+the `primary` policy; the deployed target selections remain 10-K/10-Q only.
+
 ## Lambda normalization contract
 
 After acquisition reports `RAW_STORED` or `ALREADY_COMPLETED`, the same Map
@@ -271,11 +278,12 @@ Current source documents have no expiration because they are corpus provenance.
 
 The bucket name is stable for an account, environment, and Region without being
 globally collision-prone. Terraform refuses to destroy a populated bucket by
-default. The acquisition service writes deterministic object keys and returns
-only S3 metadata—never the document body. It uses a create-only write and
-verifies an existing object's SHA-256 and length before treating a retry as
-successful. See [`docs/acquisition.md`](docs/acquisition.md) for provider
-validation, object-key, failure, and recovery contracts.
+default. The acquisition service writes deterministic object keys using the
+selected source document's name and returns only provenance plus S3
+metadata—never the document body. It uses a create-only write and verifies an
+existing object's SHA-256 and length before treating a retry as successful.
+See [`docs/acquisition.md`](docs/acquisition.md) for provider validation,
+object-key, failure, and recovery contracts.
 
 To prepare a deployment:
 

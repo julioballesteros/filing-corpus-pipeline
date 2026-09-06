@@ -16,7 +16,7 @@ from filing_corpus_pipeline.acquisition import (
     RetrievedDocument,
     RetryableAcquisitionError,
 )
-from filing_corpus_pipeline.domain import FilingReference
+from filing_corpus_pipeline.domain import FilingReference, SourceDocumentReference
 from filing_corpus_pipeline.registry import (
     ClaimOutcome,
     ClaimRequest,
@@ -122,6 +122,18 @@ def request() -> AcquisitionRequest:
     )
 
 
+def source_document(
+    *, document_name: str = "aapl-20250628.htm"
+) -> SourceDocumentReference:
+    return SourceDocumentReference(
+        document_name=document_name,
+        provider_document_type="10-Q",
+        description=None,
+        source_url="https://www.sec.gov/report.htm",
+        resolver_version="sec-primary-v1",
+    )
+
+
 def claim_result(outcome: ClaimOutcome = ClaimOutcome.CLAIMED) -> ClaimResult:
     """Build a registry decision for the filing."""
     statuses = {
@@ -162,9 +174,9 @@ def successful_dependencies() -> (
         StubRegistryService(claim_result()),
         StubDocumentSource(
             RetrievedDocument(
+                source_document=source_document(),
                 body=b"<html>filing</html>",
                 content_type="text/html",
-                source_url="https://www.sec.gov/report.htm",
                 source_etag='"source"',
             )
         ),
@@ -195,6 +207,8 @@ def test_acquire_claims_retrieves_stores_and_finalizes() -> None:
         "raw/sec/0000320193/0000320193-25-000079/aapl-20250628.htm"
     )
     assert storage.calls[0].filing_key == result.filing_key
+    assert storage.calls[0].source_document == source_document()
+    assert result.document.source_document == source_document()
     assert registry.stored_calls[0].stored_at == datetime(2025, 8, 1, 18, 1, tzinfo=UTC)
     assert registry.failed_calls == []
 
@@ -284,9 +298,9 @@ def test_acquire_rejects_empty_provider_bytes_as_permanent() -> None:
     registry, _, storage = successful_dependencies()
     source = StubDocumentSource(
         RetrievedDocument(
+            source_document=source_document(),
             body=b"",
             content_type="text/html",
-            source_url="https://www.sec.gov/report.htm",
         )
     )
 
@@ -300,12 +314,17 @@ def test_acquire_rejects_empty_provider_bytes_as_permanent() -> None:
 def test_acquire_records_an_object_key_over_the_s3_limit() -> None:
     """Oversized provider identity cannot strand a claimed filing."""
     registry, source, storage = successful_dependencies()
-    oversized_request = request().model_copy(
-        update={
-            "filing": filing_reference().model_copy(
-                update={"primary_document": "x" * 1020}
-            )
-        },
+    oversized_filing = FilingReference.model_validate(
+        {
+            **filing_reference().model_dump(),
+            "provider_issuer_id": "x" * 1020,
+        }
+    )
+    oversized_request = AcquisitionRequest(
+        filing=oversized_filing,
+        owner_id="execution-1",
+        requested_at=datetime(2025, 8, 1, 18, 0, tzinfo=UTC),
+        lease_duration=timedelta(minutes=5),
     )
 
     with pytest.raises(PermanentAcquisitionError) as raised:
