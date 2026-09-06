@@ -104,17 +104,17 @@ document policies. The service already routes targets through a provider
 registry; the deployed runtime currently registers only SEC and supports
 discovery for `10-K`/`primary`, `10-Q`/`primary`, and
 `8-K`/`earnings-release`. Earnings releases are identified by SEC Item 2.02;
-the deployed target manifest keeps that route inactive until acquisition and
-normalization implement it. The Lambda environment must contain
-`SEC_USER_AGENT` with a declared application name and monitored contact address.
+the deployed target manifest keeps that route inactive until normalization
+implements it. The Lambda environment must contain `SEC_USER_AGENT` with a
+declared application name and monitored contact address.
 
 Filing type codes are regulator-qualified strings, while document policies are
 closed capabilities implemented incrementally by pipeline stage. This
 distinction leaves discovery extensible without pretending that downstream
 processing exists. The SEC earnings-release route is expressed as `8-K` plus an
 `earnings-release` document policy; discovery requires Item 2.02 rather than
-treating every 8-K or EX-99.1 as an earnings release. Acquisition will later
-resolve the appropriate exhibit.
+treating every 8-K or EX-99.1 as an earnings release. Acquisition resolves the
+appropriate EX-99 exhibit from the filing's document inventory.
 
 For recurring runs, EventBridge Scheduler supplies only its execution time and
 the global rolling-window policy:
@@ -178,9 +178,10 @@ pipeline-domain models.
 Acquisition resolves the concrete provider document behind the selection
 policy and returns a `source_document` identity with its S3 metadata. That
 identity records the actual document name/type, URL, and resolver version, so a
-future 8-K exhibit can flow through the generic service without being confused
-with the filing's primary document. The SEC implementation still accepts only
-the `primary` policy; the deployed target selections remain 10-K/10-Q only.
+selected 8-K exhibit flows through the generic service without being confused
+with the filing's primary document. The SEC implementation supports `primary`
+and `8-K`/`earnings-release`; the deployed target selections remain 10-K/10-Q
+until normalization gains earnings-release support.
 
 ## Lambda normalization contract
 

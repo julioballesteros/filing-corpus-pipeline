@@ -67,14 +67,14 @@ selection uses `filing_type: "8-K"` with
 records whose submissions metadata includes Item 2.02, excluding unrelated
 current reports and amendments unless they are explicitly supported later. It
 retains the accession, filing-detail URL, and primary-document metadata needed
-by the next stage. A source-specific acquisition resolver will later inspect the
-filing document list and select the relevant exhibit.
+by the next stage. The source-specific acquisition resolver inspects the filing
+document list and selects the relevant EX-99 exhibit.
 
 The source-controlled development manifest intentionally contains only the two
 end-to-end routes, `10-K`/`primary` and `10-Q`/`primary`. Do not activate the
-8-K selection there until acquisition and normalization support it; otherwise
-the state machine would correctly discover the filing and then record a
-permanent acquisition failure for the unsupported policy.
+8-K selection there until normalization supports it; otherwise the state
+machine would acquire the exhibit and then correctly record a permanent
+normalization failure for the unsupported policy.
 
 ## Version and integrity
 
