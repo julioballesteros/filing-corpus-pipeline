@@ -61,7 +61,9 @@ returns typed sequence, description, filename, SEC document type, byte size,
 and canonical URL values. The parser excludes the complete-submission row and
 the separate XBRL data-file table, normalizes display whitespace, and rejects
 missing, duplicate, or malformed identities. Filing-detail responses are
-bounded to 2 MiB by default.
+bounded to 2 MiB by default. Deployments configure the independent document and
+inventory limits through `MAX_DOCUMENT_BYTES` and `MAX_FILING_DETAIL_BYTES`;
+both are validated by the Lambda before any claim or provider request.
 
 The earnings resolver considers only `EX-99` document types. It prefers a
 description explicitly identifying earnings or financial results, then a
@@ -73,6 +75,10 @@ of using table order. The absence of any candidate produces
 The resolver version `sec-earnings-release-v1` is persisted with the selected
 document, and the advertised document size is checked before the second HTTP
 request.
+
+Completion logs include the filing type, document policy, selected document
+name and SEC type, and resolver version. The fields make selection decisions
+queryable without logging source bytes or unbounded descriptions.
 
 ## Object identity and idempotency
 

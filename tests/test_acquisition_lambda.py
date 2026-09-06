@@ -1,5 +1,6 @@
 """Tests for the dedicated raw-filing acquisition Lambda entrypoint."""
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -68,6 +69,7 @@ def configure_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAW_BUCKET_NAME", "filing-corpus-raw")
     monkeypatch.setenv("ACQUISITION_LEASE_SECONDS", "300")
     monkeypatch.setenv("MAX_DOCUMENT_BYTES", str(25 * 1024 * 1024))
+    monkeypatch.setenv("MAX_FILING_DETAIL_BYTES", str(2 * 1024 * 1024))
 
 
 def stored_result() -> AcquisitionResult:
@@ -97,6 +99,7 @@ def stored_result() -> AcquisitionResult:
 
 def test_handler_composes_acquisition_and_returns_only_metadata(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """One Map item becomes an application request without carrying bytes out."""
     configure_environment(monkeypatch)
@@ -112,6 +115,7 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
         "build_acquisition_service",
         build_service,
     )
+    caplog.set_level(logging.INFO, logger=acquisition_handler.__name__)
 
     result = acquisition_handler.handler(valid_event(), object())
 
@@ -122,12 +126,22 @@ def test_handler_composes_acquisition_and_returns_only_metadata(
             "registry_table_name": "filing-registry",
             "raw_bucket_name": "filing-corpus-raw",
             "max_document_bytes": 25 * 1024 * 1024,
+            "max_filing_detail_bytes": 2 * 1024 * 1024,
         }
     ]
     request = service.requests[0]
     assert request.filing == filing_reference()
     assert request.requested_at == datetime(2025, 8, 1, 18, tzinfo=UTC)
     assert request.lease_duration == timedelta(minutes=5)
+    completion = next(
+        record
+        for record in caplog.records
+        if record.message == "Filing acquisition completed"
+    )
+    assert completion.__dict__["document_policy"] == "primary"
+    assert completion.__dict__["source_document_name"] == "aapl-20250628.htm"
+    assert completion.__dict__["source_document_type"] == "10-Q"
+    assert completion.__dict__["resolver_version"] == "sec-primary-v1"
 
 
 def test_handler_preserves_retryable_error_type(
@@ -205,6 +219,7 @@ def test_parser_translates_invalid_lease_policy() -> None:
         "RAW_BUCKET_NAME",
         "ACQUISITION_LEASE_SECONDS",
         "MAX_DOCUMENT_BYTES",
+        "MAX_FILING_DETAIL_BYTES",
     ],
 )
 def test_handler_requires_runtime_configuration(
@@ -227,6 +242,8 @@ def test_handler_requires_runtime_configuration(
         ("ACQUISITION_LEASE_SECONDS", "86401"),
         ("MAX_DOCUMENT_BYTES", "0"),
         ("MAX_DOCUMENT_BYTES", str(50 * 1024 * 1024 + 1)),
+        ("MAX_FILING_DETAIL_BYTES", "0"),
+        ("MAX_FILING_DETAIL_BYTES", str(10 * 1024 * 1024 + 1)),
     ],
 )
 def test_handler_rejects_invalid_resource_bounds(

@@ -70,6 +70,7 @@ def test_acquisition_composition_builds_aws_storage_and_sec_source(
         registry_table_name="filing-registry",
         raw_bucket_name="filing-corpus-raw",
         max_document_bytes=1024,
+        max_filing_detail_bytes=2048,
     )
 
     assert isinstance(service, AcquisitionService)
@@ -88,6 +89,7 @@ def test_acquisition_composition_reads_source_runtime_configuration(
             registry_table_name="filing-registry",
             raw_bucket_name="filing-corpus-raw",
             max_document_bytes=1024,
+            max_filing_detail_bytes=2048,
         ),
         AcquisitionService,
     )
@@ -104,6 +106,7 @@ def test_acquisition_composition_requires_source_runtime_configuration(
             registry_table_name="filing-registry",
             raw_bucket_name="filing-corpus-raw",
             max_document_bytes=1024,
+            max_filing_detail_bytes=2048,
         )
 
 

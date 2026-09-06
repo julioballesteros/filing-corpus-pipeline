@@ -16,10 +16,12 @@ schedule_expression = "rate(6 hours)"
 schedule_enabled = false
 
 # Keep provider pressure and burst cost bounded. The defaults allow two filing
-# downloads at once, a five-minute recoverable claim, and a 25 MiB document.
-acquisition_map_max_concurrency = 2
-acquisition_lease_seconds       = 300
-acquisition_max_document_bytes  = 26214400
+# downloads at once, a five-minute recoverable claim, a 25 MiB document, and a
+# 2 MiB SEC filing-detail page used to resolve exhibits.
+acquisition_map_max_concurrency        = 2
+acquisition_lease_seconds              = 300
+acquisition_max_document_bytes         = 26214400
+acquisition_max_filing_detail_bytes    = 2097152
 
 # Normalization runs after acquisition within each Map iteration. Its longer
 # lease covers bounded parsing and it loads no more than acquisition accepts.

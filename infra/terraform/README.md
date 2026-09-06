@@ -42,7 +42,8 @@ workflow state.
   read/normalized write access for normalization;
 - retained JSON Lambda logs, complete workflow logs, and X-Ray tracing;
 - per-registration filing selections, a Map concurrency limit, claim lease,
-  document-size cap, and Lambda timeouts to bound work and SEC request pressure;
+  separate document and filing-detail size caps, and Lambda timeouts to bound
+  work and SEC request pressure;
 - an on-demand, encrypted DynamoDB filing registry with point-in-time recovery;
 - private, encrypted and versioned S3 buckets for raw source documents and
   normalized corpus artifacts.

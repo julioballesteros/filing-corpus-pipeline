@@ -25,6 +25,7 @@ def build_acquisition_service(
     registry_table_name: str,
     raw_bucket_name: str,
     max_document_bytes: int,
+    max_filing_detail_bytes: int,
     sec_user_agent: str | None = None,
 ) -> AcquisitionService:
     """Compose storage and all document sources enabled in this runtime."""
@@ -49,7 +50,10 @@ def build_acquisition_service(
                 timeout_seconds=20.0,
             ),
         ),
-        config=SecDocumentConfig(max_document_bytes=max_document_bytes),
+        config=SecDocumentConfig(
+            max_document_bytes=max_document_bytes,
+            max_filing_detail_bytes=max_filing_detail_bytes,
+        ),
     )
     return AcquisitionService(
         registry=FilingRegistryService(dynamodb),

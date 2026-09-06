@@ -63,6 +63,7 @@ resource "aws_lambda_function" "acquisition" {
     variables = {
       ACQUISITION_LEASE_SECONDS = tostring(var.acquisition_lease_seconds)
       MAX_DOCUMENT_BYTES        = tostring(var.acquisition_max_document_bytes)
+      MAX_FILING_DETAIL_BYTES   = tostring(var.acquisition_max_filing_detail_bytes)
       RAW_BUCKET_NAME           = aws_s3_bucket.raw_documents.bucket
       REGISTRY_TABLE_NAME       = aws_dynamodb_table.filing_registry.name
       SEC_USER_AGENT            = var.sec_user_agent

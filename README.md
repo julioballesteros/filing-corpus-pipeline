@@ -182,6 +182,9 @@ selected 8-K exhibit flows through the generic service without being confused
 with the filing's primary document. The SEC implementation supports `primary`
 and `8-K`/`earnings-release`; the deployed target selections remain 10-K/10-Q
 until normalization gains earnings-release support.
+The acquisition Lambda independently bounds source documents and SEC
+filing-detail pages, and its structured completion log identifies the selected
+document and resolver version without logging filing content.
 
 ## Lambda normalization contract
 

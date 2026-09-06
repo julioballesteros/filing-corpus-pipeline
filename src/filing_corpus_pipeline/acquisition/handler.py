@@ -21,6 +21,7 @@ from filing_corpus_pipeline.runtime.config import (
 LOGGER = logging.getLogger(__name__)
 MAX_LEASE_SECONDS = 24 * 60 * 60
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+MAX_FILING_DETAIL_BYTES = 10 * 1024 * 1024
 
 
 class InvalidAcquisitionEvent(ValueError):
@@ -40,6 +41,10 @@ def handler(event: object, context: object) -> dict[str, object]:
         "MAX_DOCUMENT_BYTES",
         maximum=MAX_DOCUMENT_BYTES,
     )
+    max_filing_detail_bytes = positive_environment_integer(
+        "MAX_FILING_DETAIL_BYTES",
+        maximum=MAX_FILING_DETAIL_BYTES,
+    )
     request = parse_acquisition_event(
         event,
         lease_duration=timedelta(seconds=lease_seconds),
@@ -48,6 +53,7 @@ def handler(event: object, context: object) -> dict[str, object]:
         registry_table_name=registry_table_name,
         raw_bucket_name=raw_bucket_name,
         max_document_bytes=max_document_bytes,
+        max_filing_detail_bytes=max_filing_detail_bytes,
     )
     try:
         result = service.acquire(request)
@@ -57,6 +63,8 @@ def handler(event: object, context: object) -> dict[str, object]:
             extra={
                 "provider": request.filing.provider,
                 "provider_filing_id": request.filing.provider_filing_id,
+                "filing_type": request.filing.filing_type,
+                "document_policy": request.filing.document_policy.value,
                 "failure_code": error.code,
                 "retryable": error.retryable,
             },
@@ -68,9 +76,26 @@ def handler(event: object, context: object) -> dict[str, object]:
         extra={
             "provider": request.filing.provider,
             "provider_filing_id": request.filing.provider_filing_id,
+            "filing_type": request.filing.filing_type,
+            "document_policy": request.filing.document_policy.value,
             "filing_key": result.filing_key,
             "outcome": result.outcome.value,
             "attempt_count": result.attempt_count,
+            "source_document_name": (
+                result.document.source_document.document_name
+                if result.document is not None
+                else None
+            ),
+            "source_document_type": (
+                result.document.source_document.provider_document_type
+                if result.document is not None
+                else None
+            ),
+            "resolver_version": (
+                result.document.source_document.resolver_version
+                if result.document is not None
+                else None
+            ),
         },
     )
     return result.model_dump(mode="json")

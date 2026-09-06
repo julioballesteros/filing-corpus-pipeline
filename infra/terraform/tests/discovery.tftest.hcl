@@ -181,10 +181,10 @@ run "default_ingestion_slice" {
 
   assert {
     condition = (
-      aws_lambda_function.acquisition.environment[0].variables.MAX_DOCUMENT_BYTES ==
-      "26214400"
+      aws_lambda_function.acquisition.environment[0].variables.MAX_DOCUMENT_BYTES == "26214400" &&
+      aws_lambda_function.acquisition.environment[0].variables.MAX_FILING_DETAIL_BYTES == "2097152"
     )
-    error_message = "The acquisition Lambda must receive its document-size bound."
+    error_message = "The acquisition Lambda must receive its document and filing-detail size bounds."
   }
 
   assert {
@@ -450,6 +450,18 @@ run "invalid_account_allowlist" {
   }
 
   expect_failures = [var.allowed_account_ids]
+}
+
+run "invalid_acquisition_filing_detail_bound" {
+  command = plan
+
+  variables {
+    acquisition_max_filing_detail_bytes = 0
+    allowed_account_ids                 = ["123456789012"]
+    sec_user_agent                      = "filing-corpus-pipeline ci@example.com"
+  }
+
+  expect_failures = [var.acquisition_max_filing_detail_bytes]
 }
 
 run "enabled_schedule" {

@@ -174,6 +174,21 @@ variable "acquisition_max_document_bytes" {
   }
 }
 
+variable "acquisition_max_filing_detail_bytes" {
+  description = "Maximum SEC filing-detail response size accepted during acquisition."
+  type        = number
+  default     = 2097152
+
+  validation {
+    condition = (
+      var.acquisition_max_filing_detail_bytes >= 65536 &&
+      var.acquisition_max_filing_detail_bytes <= 10485760 &&
+      floor(var.acquisition_max_filing_detail_bytes) == var.acquisition_max_filing_detail_bytes
+    )
+    error_message = "acquisition_max_filing_detail_bytes must be an integer from 64 KiB through 10 MiB."
+  }
+}
+
 variable "normalization_lease_seconds" {
   description = "Registry claim lease assigned to each normalization invocation."
   type        = number
